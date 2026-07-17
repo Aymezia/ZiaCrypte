@@ -117,7 +117,7 @@ Prebuilt binaries are provided outside the git tree (source stays binary-free):
 | 6 | Crypto engine implementation (X3DH + Double Ratchet) | ✅ tested |
 | 7 | Secure storage + encrypted session persistence | ✅ tested |
 | 8 | Cross-platform build + native key stores | ✅ Windows validated |
-| 9 | Dart FFI layer (engine ↔ Flutter app) | ⏳ next |
+| 9 | Dart FFI layer (engine ↔ Flutter app) | ✅ tested (9/9 end-to-end) |
 | 10+ | Backend endpoints, real-time transport, UI, signing & store release | planned |
 
 ---
