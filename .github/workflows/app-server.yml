@@ -48,12 +48,30 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+
+      # Le moteur natif est requis pour le test d'intégration FFI.
+      - name: Build native crypto engine
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsodium-dev libsecret-1-dev
+          cd crypto-engine
+          cmake --preset linux-system
+          cmake --build --preset linux-system
+
       - name: Install
         working-directory: app
         run: flutter pub get
       - name: Analyze
         working-directory: app
         run: flutter analyze
-      - name: Test
+      - name: Test (unit + FFI integration)
         working-directory: app
-        run: flutter test
+        env:
+          ZIA_CRYPTO_LIB: ${{ github.workspace }}/crypto-engine/build/linux-system/src/libzia_crypto.so
+        # dbus-run-session fournit le Secret Service (libsecret) requis par la
+        # persistance de session testée à travers le FFI.
+        run: |
+          sudo apt-get install -y gnome-keyring dbus-x11
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --components=secrets
+            flutter test'

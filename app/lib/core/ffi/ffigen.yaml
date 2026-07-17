@@ -1,0 +1,30 @@
+# Configuration ffigen pour régénérer les bindings bas niveau à partir du header
+# C du moteur. Lancer depuis app/ : `dart run ffigen --config lib/core/ffi/ffigen.yaml`
+#
+# Les bindings générés (zia_bindings.dart) ne doivent JAMAIS être édités à la
+# main — seul ce fichier et le header C font foi. La version présente dans le
+# dépôt a été écrite à la main en attendant l'exécution de ffigen (qui requiert
+# libclang), mais reflète exactement la même surface.
+name: ZiaBindings
+description: Bindings FFI bruts du moteur cryptographique ZiaCrypte.
+output: 'lib/core/ffi/zia_bindings.dart'
+headers:
+  entry-points:
+    - '../crypto-engine/include/zia/zia_crypto.h'
+  include-directives:
+    - '**/zia_crypto.h'
+comments:
+  style: any
+  length: full
+preamble: |
+  // GÉNÉRÉ — ne pas éditer à la main. Régénérer via ffigen (cf. ffigen.yaml).
+  // ignore_for_file: type=lint, unused_field, camel_case_types, non_constant_identifier_names
+functions:
+  include:
+    - 'zia_.*'
+structs:
+  include:
+    - 'Zia.*'
+enums:
+  include:
+    - 'ZiaStatus'
