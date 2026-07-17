@@ -25,3 +25,10 @@ crypto-engine/cmake-build-*/
 
 # CTest artifacts
 crypto-engine/Testing/
+
+# Archive de transfert
+ziacrypte.bundle
+
+# Binaires distribuables (fournis hors-git : download direct ou Releases)
+dist/
+*.zip
