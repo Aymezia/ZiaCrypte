@@ -1,0 +1,240 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DevicePlatform {
+  android
+  ios
+  windows
+  macos
+  linux
+}
+
+enum ConversationType {
+  direct
+  group
+}
+
+enum ParticipantRole {
+  member
+  admin
+}
+
+enum ReceiptEventType {
+  delivered
+  read
+}
+
+enum PushPlatform {
+  fcm
+  apns
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  username     String    @unique
+  displayName  String    @map("display_name")
+  passwordHash String?   @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  devices              Device[]
+  webauthnCredentials  WebauthnCredential[]
+  createdConversations Conversation[]            @relation("ConversationCreator")
+  participants         ConversationParticipant[]
+  authSessions         AuthSession[]
+
+  @@map("users")
+}
+
+model WebauthnCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  credentialId Bytes    @unique @map("credential_id")
+  publicKey    Bytes    @map("public_key")
+  signCount    BigInt   @default(0) @map("sign_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("webauthn_credentials")
+}
+
+model Device {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  deviceName        String   @map("device_name")
+  platform          DevicePlatform
+  identityPublicKey Bytes    @map("identity_public_key")
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  lastSeenAt        DateTime @default(now()) @map("last_seen_at")
+
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  signedPrekeys      SignedPrekey[]
+  oneTimePrekeys     OneTimePrekey[]
+  signaturesGiven    DeviceSignature[] @relation("Signer")
+  signaturesReceived DeviceSignature[] @relation("Signed")
+  pushTokens         PushToken[]
+  authSessions       AuthSession[]
+
+  @@map("devices")
+}
+
+model SignedPrekey {
+  id        String   @id @default(uuid()) @db.Uuid
+  deviceId  String   @map("device_id") @db.Uuid
+  publicKey Bytes    @map("public_key")
+  signature Bytes
+  isCurrent Boolean  @default(true) @map("is_current")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("signed_prekeys")
+}
+
+model OneTimePrekey {
+  id         String    @id @default(uuid()) @db.Uuid
+  deviceId   String    @map("device_id") @db.Uuid
+  publicKey  Bytes     @map("public_key")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("one_time_prekeys")
+}
+
+model DeviceSignature {
+  id             String   @id @default(uuid()) @db.Uuid
+  signerDeviceId String   @map("signer_device_id") @db.Uuid
+  signedDeviceId String   @map("signed_device_id") @db.Uuid
+  signature      Bytes
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  signer Device @relation("Signer", fields: [signerDeviceId], references: [id], onDelete: Cascade)
+  signed Device @relation("Signed", fields: [signedDeviceId], references: [id], onDelete: Cascade)
+
+  @@unique([signerDeviceId, signedDeviceId])
+  @@map("device_signatures")
+}
+
+model Conversation {
+  id        String           @id @default(uuid()) @db.Uuid
+  type      ConversationType
+  createdBy String           @map("created_by") @db.Uuid
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  creator      User                      @relation("ConversationCreator", fields: [createdBy], references: [id])
+  participants ConversationParticipant[]
+  messageBlobs MessageBlob[]
+  attachments  AttachmentRef[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  conversationId String          @map("conversation_id") @db.Uuid
+  userId         String          @map("user_id") @db.Uuid
+  role           ParticipantRole @default(member)
+  joinedAt       DateTime        @default(now()) @map("joined_at")
+  leftAt         DateTime?       @map("left_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+model MessageBlob {
+  id                String    @id @default(uuid()) @db.Uuid
+  conversationId    String    @map("conversation_id") @db.Uuid
+  senderDeviceId    String    @map("sender_device_id") @db.Uuid
+  recipientDeviceId String    @map("recipient_device_id") @db.Uuid
+  clientMessageId   String    @map("client_message_id") @db.Uuid
+  ratchetHeader     Bytes     @map("ratchet_header")
+  ciphertext        Bytes
+  createdAt         DateTime  @default(now()) @map("created_at")
+  deliveredAt       DateTime? @map("delivered_at")
+  expiresAt         DateTime  @map("expires_at")
+
+  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  receipts     MessageReceipt[]
+
+  @@unique([recipientDeviceId, clientMessageId])
+  @@map("message_blobs")
+}
+
+model MessageReceipt {
+  messageBlobId String           @map("message_blob_id") @db.Uuid
+  eventType     ReceiptEventType @map("event_type")
+  occurredAt    DateTime         @default(now()) @map("occurred_at")
+
+  messageBlob MessageBlob @relation(fields: [messageBlobId], references: [id], onDelete: Cascade)
+
+  @@id([messageBlobId, eventType])
+  @@map("message_receipts")
+}
+
+model AttachmentRef {
+  id                String    @id @default(uuid()) @db.Uuid
+  conversationId    String    @map("conversation_id") @db.Uuid
+  uploaderDeviceId  String    @map("uploader_device_id") @db.Uuid
+  storageKey        String    @map("storage_key")
+  encryptedMetadata Bytes     @map("encrypted_metadata")
+  ciphertextSize    BigInt    @map("ciphertext_size")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  expiresAt         DateTime? @map("expires_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("attachment_refs")
+}
+
+model PushToken {
+  id        String       @id @default(uuid()) @db.Uuid
+  deviceId  String       @map("device_id") @db.Uuid
+  platform  PushPlatform
+  token     String
+  updatedAt DateTime     @default(now()) @map("updated_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, platform])
+  @@map("push_tokens")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  deviceId         String    @map("device_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash")
+  issuedAt         DateTime  @default(now()) @map("issued_at")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("auth_sessions")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  deviceId  String?  @map("device_id") @db.Uuid
+  eventType String   @map("event_type")
+  ipHash    String?  @map("ip_hash")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_log")
+}

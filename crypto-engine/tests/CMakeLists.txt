@@ -1,0 +1,4 @@
+add_executable(zia_crypto_conformance_test conformance_test.cpp)
+target_link_libraries(zia_crypto_conformance_test PRIVATE zia_crypto)
+
+add_test(NAME conformance COMMAND zia_crypto_conformance_test)

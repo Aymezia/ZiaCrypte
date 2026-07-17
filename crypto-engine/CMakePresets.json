@@ -1,0 +1,82 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ZIA_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "vcpkg",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+      }
+    },
+    {
+      "name": "linux",
+      "displayName": "Linux (x64, vcpkg)",
+      "inherits": ["base", "vcpkg"],
+      "cacheVariables": { "VCPKG_TARGET_TRIPLET": "x64-linux" }
+    },
+    {
+      "name": "linux-system",
+      "displayName": "Linux (libsodium système, sans vcpkg)",
+      "inherits": ["base"],
+      "description": "Poste de dev / CI légère : utilise le repli pkg-config du CMakeLists"
+    },
+    {
+      "name": "windows",
+      "displayName": "Windows (x64, vcpkg)",
+      "inherits": ["base", "vcpkg"],
+      "cacheVariables": { "VCPKG_TARGET_TRIPLET": "x64-windows" }
+    },
+    {
+      "name": "macos",
+      "displayName": "macOS (universal, vcpkg)",
+      "inherits": ["base", "vcpkg"],
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "VCPKG_TARGET_TRIPLET": "x64-osx"
+      }
+    },
+    {
+      "name": "ios",
+      "displayName": "iOS (arm64, vcpkg)",
+      "inherits": ["base", "vcpkg"],
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "VCPKG_TARGET_TRIPLET": "arm64-ios"
+      }
+    },
+    {
+      "name": "android-arm64",
+      "displayName": "Android (arm64-v8a, NDK + vcpkg)",
+      "inherits": ["base", "vcpkg"],
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "Android",
+        "CMAKE_ANDROID_ARCH_ABI": "arm64-v8a",
+        "VCPKG_TARGET_TRIPLET": "arm64-android"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "linux", "configurePreset": "linux" },
+    { "name": "linux-system", "configurePreset": "linux-system" },
+    { "name": "windows", "configurePreset": "windows" },
+    { "name": "macos", "configurePreset": "macos" },
+    { "name": "ios", "configurePreset": "ios" },
+    { "name": "android-arm64", "configurePreset": "android-arm64" }
+  ],
+  "testPresets": [
+    { "name": "linux", "configurePreset": "linux" },
+    { "name": "linux-system", "configurePreset": "linux-system" }
+  ]
+}

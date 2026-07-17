@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ziacrypte
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: ziacrypte
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  server:
+    build:
+      context: ../server
+    env_file:
+      - ../server/.env
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

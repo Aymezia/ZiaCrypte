@@ -1,0 +1,188 @@
+openapi: 3.1.0
+info:
+  title: ZiaCrypte API
+  version: "1.0"
+servers:
+  - url: https://api.ziacrypte.example/v1
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, device]
+              properties:
+                username: { type: string }
+                password: { type: string, description: "omis si inscription WebAuthn" }
+                device: { $ref: '#/components/schemas/DeviceRegistration' }
+      responses:
+        '201':
+          description: Compte et premier appareil créés
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokens' }
+
+  /auth/login:
+    post:
+      security: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokens' }
+
+  /auth/refresh:
+    post:
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokens' }
+
+  /devices/{userId}:
+    get:
+      summary: Liste des appareils publics d'un utilisateur
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DevicePublic' }
+
+  /devices/{deviceId}/prekeys:
+    post:
+      summary: Upload de prekeys (clés publiques uniquement)
+      parameters:
+        - { name: deviceId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrekeyUpload' }
+      responses:
+        '204': { description: Prekeys enregistrées }
+
+  /users/{userId}/prekey-bundle:
+    get:
+      summary: Bundle pour initier un handshake X3DH
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrekeyBundle' }
+
+  /conversations:
+    post:
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+
+  /conversations/{id}/messages:
+    get:
+      summary: Blobs chiffrés en attente depuis un curseur temporel
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EncryptedEnvelopeDto' }
+
+  /attachments:
+    post:
+      summary: Obtenir une URL d'upload pré-signée pour un blob déjà chiffré côté client
+      responses:
+        '201':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachmentUploadUrl' }
+
+  /push-tokens:
+    post:
+      responses:
+        '204': { description: Jeton enregistré }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  schemas:
+    DeviceRegistration:
+      type: object
+      required: [platform, identityPublicKey, signedPrekey, signedPrekeySignature]
+      properties:
+        platform: { type: string, enum: [android, ios, windows, macos, linux] }
+        identityPublicKey: { type: string, format: byte, description: "Ed25519, base64" }
+        signedPrekey: { type: string, format: byte }
+        signedPrekeySignature: { type: string, format: byte }
+        oneTimePrekeys: { type: array, items: { type: string, format: byte } }
+
+    DevicePublic:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { type: string }
+        identityPublicKey: { type: string, format: byte }
+        isActive: { type: boolean }
+
+    PrekeyUpload:
+      type: object
+      properties:
+        signedPrekey: { type: string, format: byte }
+        signedPrekeySignature: { type: string, format: byte }
+        oneTimePrekeys: { type: array, items: { type: string, format: byte } }
+
+    PrekeyBundle:
+      type: object
+      properties:
+        identityKey: { type: string, format: byte }
+        signedPrekey: { type: string, format: byte }
+        signedPrekeySignature: { type: string, format: byte }
+        oneTimePrekey: { type: string, format: byte, nullable: true }
+
+    Conversation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [direct, group] }
+        createdAt: { type: string, format: date-time }
+
+    EncryptedEnvelopeDto:
+      type: object
+      description: "Représentation JSON de zia.protocol.v1.EncryptedEnvelope — utilisée uniquement pour le REST ; le WebSocket transporte le protobuf binaire natif"
+      properties:
+        messageId: { type: string, format: uuid }
+        senderDeviceId: { type: string, format: uuid }
+        ratchetHeader: { type: string, format: byte }
+        ciphertext: { type: string, format: byte }
+        timestampMs: { type: integer, format: int64 }
+
+    AttachmentUploadUrl:
+      type: object
+      properties:
+        attachmentId: { type: string, format: uuid }
+        uploadUrl: { type: string, format: uri }
+        expiresAt: { type: string, format: date-time }
+
+    AuthTokens:
+      type: object
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn: { type: integer }

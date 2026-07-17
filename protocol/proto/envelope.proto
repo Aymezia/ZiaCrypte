@@ -1,0 +1,45 @@
+syntax = "proto3";
+package zia.protocol.v1;
+
+message EncryptedEnvelope {
+  string message_id          = 1; // UUID v4, dédup / idempotence
+  string session_id          = 2;
+  string sender_device_id    = 3;
+  string recipient_device_id = 4;
+  bytes  ratchet_header      = 5; // clé DH publique courante + compteurs N, PN
+  bytes  ciphertext          = 6; // ChaCha20-Poly1305 IETF
+  int64  timestamp_ms        = 7;
+
+  // Présents uniquement sur le tout premier message d'une nouvelle session :
+  // le ratchet_header seul ne permet pas au répondeur de recalculer le secret
+  // X3DH (SK). Ajouté en Phase 6 suite à une lacune identifiée à l'implémentation.
+  optional bytes initiator_identity_key  = 8;
+  optional bytes initiator_ephemeral_key = 9;
+  optional bytes used_one_time_prekey    = 10;
+}
+
+message DeliveryReceipt {
+  string message_id     = 1;
+  string event_type     = 2; // "delivered" | "read"
+  int64  occurred_at_ms = 3;
+}
+
+message PresenceUpdate {
+  string user_id = 1;
+  bool   online  = 2;
+}
+
+message TypingIndicator {
+  string conversation_id = 1;
+  string device_id       = 2;
+}
+
+message WsFrame {
+  oneof payload {
+    EncryptedEnvelope envelope_send = 1;
+    EncryptedEnvelope envelope_push = 2;
+    DeliveryReceipt    receipt      = 3;
+    PresenceUpdate     presence     = 4;
+    TypingIndicator    typing       = 5;
+  }
+}

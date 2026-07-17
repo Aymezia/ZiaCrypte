@@ -1,0 +1,59 @@
+name: app-server
+
+# CI de l'application Flutter et du backend Node.js. Déclenché indépendamment du
+# moteur C++ (chemins distincts) pour garder des pipelines par module.
+
+on:
+  push:
+    paths:
+      - 'app/**'
+      - 'server/**'
+      - 'protocol/**'
+      - '.github/workflows/app-server.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'server/**'
+      - 'protocol/**'
+
+jobs:
+  server:
+    name: server (Node.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install
+        working-directory: server
+        run: npm ci
+      - name: Generate Prisma client
+        working-directory: server
+        run: npx prisma generate
+      - name: Type-check / build
+        working-directory: server
+        run: npm run build
+      - name: Test
+        working-directory: server
+        run: npm test
+
+  app:
+    name: app (Flutter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Install
+        working-directory: app
+        run: flutter pub get
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+      - name: Test
+        working-directory: app
+        run: flutter test
