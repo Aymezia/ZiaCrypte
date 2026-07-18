@@ -24,7 +24,7 @@ services:
       - postgres
       - redis
     ports:
-      - "3000:3000"
+      - "3210:3210"
 
 volumes:
   postgres_data:

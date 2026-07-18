@@ -13,7 +13,7 @@ class ConnectScreen extends StatefulWidget {
 }
 
 class _ConnectScreenState extends State<ConnectScreen> {
-  final _server = TextEditingController(text: 'http://127.0.0.1:3000');
+  final _server = TextEditingController(text: 'http://127.0.0.1:3210');
   final _username = TextEditingController();
   final _password = TextEditingController(text: 'password123');
   final _formKey = GlobalKey<FormState>();
