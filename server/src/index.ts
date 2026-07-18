@@ -1,10 +1,11 @@
-import Fastify from 'fastify';
+import { env } from './config/env.js';
+import { buildApp } from './app.js';
+import { prisma } from './db/prisma.js';
 
-const app = Fastify({ logger: true });
+const app = buildApp();
 
-app.get('/health', async () => ({ status: 'ok' }));
-
-app.listen({ port: Number(process.env.PORT) || 3000, host: '0.0.0.0' }).catch((err) => {
+app.listen({ port: env.PORT, host: '0.0.0.0' }).catch(async (err) => {
   app.log.error(err);
+  await prisma.$disconnect();
   process.exit(1);
 });
