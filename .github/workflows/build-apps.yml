@@ -5,6 +5,9 @@ name: build-apps
 # la main, et automatiquement à la publication d'une release — les artefacts y
 # sont alors attachés.
 
+env:
+  ZIA_SERVER_URL: https://51.83.199.103.nip.io
+
 on:
   workflow_dispatch:
   release:
@@ -62,7 +65,7 @@ jobs:
         run: |
           flutter config --enable-windows-desktop
           flutter pub get
-          flutter build windows --release
+          flutter build windows --release --dart-define=ZIA_SERVER_URL=$env:ZIA_SERVER_URL
 
       - name: Assemble bundle
         shell: pwsh
@@ -116,7 +119,7 @@ jobs:
         run: |
           flutter config --enable-macos-desktop
           flutter pub get
-          flutter build macos --release
+          flutter build macos --release --dart-define=ZIA_SERVER_URL=$ZIA_SERVER_URL
 
       - name: Assemble bundle
         run: |

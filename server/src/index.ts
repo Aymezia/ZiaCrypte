@@ -4,7 +4,7 @@ import { prisma } from './db/prisma.js';
 
 const app = buildApp();
 
-app.listen({ port: env.PORT, host: '0.0.0.0' }).catch(async (err) => {
+app.listen({ port: env.PORT, host: env.HOST }).catch(async (err) => {
   app.log.error(err);
   await prisma.$disconnect();
   process.exit(1);

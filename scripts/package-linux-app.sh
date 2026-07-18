@@ -35,7 +35,10 @@ g++ -std=c++20 -O2 -DNDEBUG -fPIC -shared \
   -Wl,--exclude-libs,ALL "$SODIUM_A" $(pkg-config --libs libsecret-1)
 
 echo ">> Compilation de l'application Flutter"
-(cd "$APP" && flutter build linux --release)
+# Adresse du serveur intégrée au binaire : l'utilisateur n'a rien à saisir.
+ZIA_SERVER_URL="${ZIA_SERVER_URL:-https://51.83.199.103.nip.io}"
+echo "   serveur intégré : $ZIA_SERVER_URL"
+(cd "$APP" && flutter build linux --release --dart-define=ZIA_SERVER_URL="$ZIA_SERVER_URL")
 
 echo ">> Assemblage"
 rm -rf "$DIST"
