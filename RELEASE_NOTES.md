@@ -1,52 +1,51 @@
-# ZiaCrypte v0.2.1 — desktop apps for Linux, Windows and macOS
+# ZiaCrypte v0.3.0 — rien à configurer, serveur en HTTPS
 
-The messaging application, now built for the three desktop platforms. Same encrypted core everywhere: keys are generated and held by the native C++ engine, and the server only ever relays opaque ciphertext.
+The application now ships with its server address built in: download, launch, pick a username, and you are chatting. The relay runs behind HTTPS with a real certificate.
 
 ## Downloads
 
 | Asset | Platform |
 |---|---|
-| **`ziacrypte-linux-x64.tar.gz`** | Linux x64 desktop app (libsodium linked statically — nothing to install) |
-| **`ziacrypte-windows-x64-app.zip`** | Windows x64 desktop app (includes `zia_crypto.dll` + `libsodium.dll`) |
-| **`ziacrypte-macos-app.zip`** | macOS desktop app (`.app` bundle with the engine in `Contents/Frameworks`) |
+| **`ziacrypte-windows-x64-app.zip`** | Windows x64 — unzip, run `ziacrypte.exe` |
+| **`ziacrypte-linux-x64.tar.gz`** | Linux x64 — `tar xzf … && cd linux-x64 && ./ziacrypte` |
+| **`ziacrypte-macos-app.zip`** | macOS — unzip, right-click `ziacrypte.app` → Open (unsigned) |
 | `zia_crypto_test.exe` | Standalone Windows verifier for the crypto engine |
 
-## Run it
+No server address to type, no dependency to install: libsodium and the C++ runtime are linked statically into the engine.
 
-**Linux** — `tar xzf ziacrypte-linux-x64.tar.gz && cd linux-x64 && ./ziacrypte`
-**Windows** — unzip, keep all files together, run `ziacrypte.exe`
-**macOS** — unzip and open `ziacrypte.app` (unsigned: right-click → Open the first time)
+## Fixed since v0.2.1
 
-You also need a server:
+**The Windows application could not start** (`error code 126`). The engine DLL built on the Windows runner depended on `libgcc_s_seh-1.dll` and `libstdc++-6.dll`, which are not present on a normal Windows machine. The engine is now cross-compiled with everything linked statically, and CI **fails the build** if any non-system dependency reappears.
 
-```bash
-cd server
-cp .env.example .env      # set DATABASE_URL and the JWT secrets
-npx prisma db push
-npx tsx src/index.ts      # listens on 3210
-```
+## Infrastructure
 
-In the app: enter the server address, create an account, then type a peer's username to start a conversation.
+The relay is reachable at `https://51.83.199.103.nip.io`:
+
+- nginx terminates TLS on 443 with a Let's Encrypt certificate (auto-renewing)
+- The application server listens on `127.0.0.1` only — it is not directly reachable from the internet
+- HTTP redirects to HTTPS
+
+Passwords and session tokens are therefore encrypted in transit, on top of the end-to-end encryption that already protects message content.
+
+Note: embedding the address in the binary is a convenience, not a secret — it is readable with `strings` and visible in network traffic.
 
 ## What is verified, and what is not
 
-Being precise about this matters more than sounding confident.
-
 **Verified by actually running it**
-- Crypto engine conformance on Linux and Windows: X3DH, Double Ratchet, out-of-order delivery, replay rejection, tamper rejection, encrypted session persistence
+- Crypto engine conformance on Linux and Windows: X3DH, Double Ratchet, out-of-order delivery, replay and tamper rejection, encrypted session persistence
 - Full-chain assembly (`e2e/`): C++ engine ↔ Dart client ↔ Fastify ↔ PostgreSQL — 7/7
-- **The Linux application was launched and driven**: account created (confirmed in the database), X3DH handshake, an encrypted message sent from the UI and decrypted by a peer
+- **The Linux application was launched and driven**, including against the public HTTPS endpoint: account created (confirmed in the database), X3DH handshake, an encrypted message sent from the UI and decrypted by a peer
 - The server stores no plaintext — verified by SQL against the message table
 
-**Built but not run**
-- The **Windows** and **macOS** applications are compiled by CI on their own runners, and the packages are checked to contain the engine and its dependencies. They have **not been launched** — no Windows or macOS machine was available. The engine DLL is MSVC-built and exports the full API.
+**Built and checked, but never launched**
+- The **Windows** and **macOS** applications are built by CI on their own runners, and their packages are verified to contain a self-contained engine. No Windows or macOS machine was available to run them.
 
 ## Known limitations
 
-- **Device identity is not persisted between launches.** The engine generates fresh keys at startup, so the app registers a new account each time. Persisting identity through the OS key store is next.
+- **Device identity is not persisted between launches.** The engine generates fresh keys at startup, so the app registers a new account each time it starts. Persisting identity through the OS key store is the next milestone.
 - Real-time delivery uses polling every 2 seconds; a WebSocket gateway is planned.
-- iOS and Android are scaffolded but not built or published yet. iOS additionally requires an Apple Developer account for signing and installation.
-- macOS and Windows builds are unsigned, so both systems will warn on first launch.
+- Windows and macOS builds are unsigned, so both systems warn on first launch.
+- iOS and Android are scaffolded but not published. iOS requires an Apple Developer account for signing and installation.
 
 ## Security
 
