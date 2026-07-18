@@ -42,11 +42,28 @@ jobs:
       - name: Assemble bundle
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $bundle = "app/build/windows/x64/runner/Release"
-          # La DLL du moteur doit être à côté de l'exécutable.
-          Get-ChildItem -Recurse -Filter "zia_crypto.dll" crypto-engine/build |
-            Select-Object -First 1 |
-            ForEach-Object { Copy-Item $_.FullName "$bundle/zia_crypto.dll" }
+
+          # CMake nomme la bibliothèque libzia_crypto.dll ; l'application la
+          # cherche sous le nom zia_crypto.dll, à côté de l'exécutable.
+          $engine = Get-ChildItem -Recurse -Path crypto-engine/build -Filter "*zia_crypto.dll" |
+                    Select-Object -First 1
+          if (-not $engine) { throw "moteur introuvable : *zia_crypto.dll" }
+          Copy-Item $engine.FullName "$bundle/zia_crypto.dll"
+
+          # libsodium est fourni en DLL par vcpkg : dépendance runtime obligatoire.
+          $sodium = Get-ChildItem -Recurse -Path crypto-engine/build -Filter "libsodium*.dll" |
+                    Select-Object -First 1
+          if (-not $sodium) { throw "libsodium.dll introuvable" }
+          Copy-Item $sodium.FullName "$bundle/"
+
+          # Vérification : l'archive doit contenir l'exécutable ET le moteur.
+          foreach ($f in @("ziacrypte.exe", "zia_crypto.dll")) {
+            if (-not (Test-Path "$bundle/$f")) { throw "manquant dans le bundle : $f" }
+          }
+          Get-ChildItem $bundle | Select-Object Name, Length | Format-Table
+
           Compress-Archive -Path "$bundle/*" -DestinationPath ziacrypte-windows-x64-app.zip
 
       - uses: actions/upload-artifact@v4
@@ -86,10 +103,14 @@ jobs:
 
       - name: Assemble bundle
         run: |
+          set -euo pipefail
           APP=$(find app/build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -1)
           DYLIB=$(find crypto-engine/build -name "libzia_crypto*.dylib" | head -1)
+          [ -n "$APP" ] || { echo "bundle .app introuvable"; exit 1; }
+          [ -n "$DYLIB" ] || { echo "moteur .dylib introuvable"; exit 1; }
           mkdir -p "$APP/Contents/Frameworks"
           cp "$DYLIB" "$APP/Contents/Frameworks/libzia_crypto.dylib"
+          test -f "$APP/Contents/Frameworks/libzia_crypto.dylib"
           ditto -c -k --keepParent "$APP" ziacrypte-macos-x64-app.zip
 
       - uses: actions/upload-artifact@v4
