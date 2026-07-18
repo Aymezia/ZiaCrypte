@@ -49,11 +49,33 @@ class ChatService extends ChangeNotifier {
   static String _resolveLibrary() {
     final fromEnv = Platform.environment['ZIA_CRYPTO_LIB'];
     if (fromEnv != null && File(fromEnv).existsSync()) return fromEnv;
-    final beside = File(
-      '${File(Platform.resolvedExecutable).parent.path}/lib/libzia_crypto.so',
-    );
-    if (beside.existsSync()) return beside.path;
-    return 'libzia_crypto.so';
+
+    // Nom et emplacement diffèrent selon la plateforme.
+    final String fileName;
+    final List<String> candidates;
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+
+    if (Platform.isWindows) {
+      fileName = 'zia_crypto.dll';
+      candidates = ['$exeDir\\$fileName'];
+    } else if (Platform.isMacOS) {
+      fileName = 'libzia_crypto.dylib';
+      candidates = [
+        '$exeDir/../Frameworks/$fileName', // bundle .app
+        '$exeDir/$fileName',
+      ];
+    } else if (Platform.isAndroid) {
+      // Chargée depuis les jniLibs de l'APK, par simple nom.
+      return 'libzia_crypto.so';
+    } else {
+      fileName = 'libzia_crypto.so';
+      candidates = ['$exeDir/lib/$fileName', '$exeDir/$fileName'];
+    }
+
+    for (final path in candidates) {
+      if (File(path).existsSync()) return path;
+    }
+    return fileName; // laisse le chargeur système résoudre
   }
 
   static String _uuidV4() {

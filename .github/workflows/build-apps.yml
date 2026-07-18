@@ -1,0 +1,104 @@
+name: build-apps
+
+# Construit l'application de bureau pour les plateformes qu'on ne peut PAS
+# compiler depuis Linux (Windows exige MSVC, macOS exige Xcode). Déclenchable à
+# la main, et automatiquement à la publication d'une release — les artefacts y
+# sont alors attachés.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  windows:
+    name: Application Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '52c9e08cdf8580d2d9762f547d22b96fd81e82f2'
+
+      - name: Build crypto engine (MSVC + vcpkg)
+        working-directory: crypto-engine
+        run: |
+          cmake --preset windows
+          cmake --build --preset windows
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Build Flutter app
+        working-directory: app
+        run: |
+          flutter config --enable-windows-desktop
+          flutter pub get
+          flutter build windows --release
+
+      - name: Assemble bundle
+        shell: pwsh
+        run: |
+          $bundle = "app/build/windows/x64/runner/Release"
+          # La DLL du moteur doit être à côté de l'exécutable.
+          Get-ChildItem -Recurse -Filter "zia_crypto.dll" crypto-engine/build |
+            Select-Object -First 1 |
+            ForEach-Object { Copy-Item $_.FullName "$bundle/zia_crypto.dll" }
+          Compress-Archive -Path "$bundle/*" -DestinationPath ziacrypte-windows-x64-app.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ziacrypte-windows-x64-app
+          path: ziacrypte-windows-x64-app.zip
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        run: gh release upload ${{ github.event.release.tag_name }} ziacrypte-windows-x64-app.zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  macos:
+    name: Application macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build crypto engine
+        working-directory: crypto-engine
+        run: |
+          brew install libsodium
+          cmake --preset linux-system   # le repli pkg-config marche aussi sur macOS
+          cmake --build --preset linux-system
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Build Flutter app
+        working-directory: app
+        run: |
+          flutter config --enable-macos-desktop
+          flutter pub get
+          flutter build macos --release
+
+      - name: Assemble bundle
+        run: |
+          APP=$(find app/build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -1)
+          DYLIB=$(find crypto-engine/build -name "libzia_crypto*.dylib" | head -1)
+          mkdir -p "$APP/Contents/Frameworks"
+          cp "$DYLIB" "$APP/Contents/Frameworks/libzia_crypto.dylib"
+          ditto -c -k --keepParent "$APP" ziacrypte-macos-x64-app.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ziacrypte-macos-app
+          path: ziacrypte-macos-x64-app.zip
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        run: gh release upload ${{ github.event.release.tag_name }} ziacrypte-macos-x64-app.zip --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
