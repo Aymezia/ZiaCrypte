@@ -1,6 +1,6 @@
-# ZiaCrypte v0.3.0 — rien à configurer, serveur en HTTPS
+# ZiaCrypte v0.4.0 — your account survives a restart
 
-The application now ships with its server address built in: download, launch, pick a username, and you are chatting. The relay runs behind HTTPS with a real certificate.
+Until now the application generated fresh keys at every launch, which meant a brand-new account each time. That is fixed: your device identity is stored encrypted, and the app reconnects to your account with just your password.
 
 ## Downloads
 
@@ -11,42 +11,34 @@ The application now ships with its server address built in: download, launch, pi
 | **`ziacrypte-macos-app.zip`** | macOS — unzip, right-click `ziacrypte.app` → Open (unsigned) |
 | `zia_crypto_test.exe` | Standalone Windows verifier for the crypto engine |
 
-No server address to type, no dependency to install: libsodium and the C++ runtime are linked statically into the engine.
+Nothing to configure: the server address is built in, and libsodium is linked statically.
 
-## Fixed since v0.2.1
+## What changed
 
-**The Windows application could not start** (`error code 126`). The engine DLL built on the Windows runner depended on `libgcc_s_seh-1.dll` and `libstdc++-6.dll`, which are not present on a normal Windows machine. The engine is now cross-compiled with everything linked statically, and CI **fails the build** if any non-system dependency reappears.
+**Identity persistence.** The engine now writes its identity — Ed25519 identity key, signed prekey, one-time prekeys — to `identity.zia`, encrypted with `crypto_secretstream_xchacha20poly1305` under a master key held by the operating system key store (Secret Service on Linux, DPAPI on Windows, Keychain on macOS). It reloads that identity on startup.
 
-## Infrastructure
+Writes are atomic (temporary file then rename), and reads are bounds-checked so a corrupted file fails cleanly instead of being trusted.
 
-The relay is reachable at `https://51.83.199.103.nip.io`:
+**Reconnection.** The application remembers which account belongs to this device (username and identifiers — no secrets) and asks only for your password on the next launch. "Use a different account" is available if you want to start over.
 
-- nginx terminates TLS on 443 with a Let's Encrypt certificate (auto-renewing)
-- The application server listens on `127.0.0.1` only — it is not directly reachable from the internet
-- HTTP redirects to HTTPS
+**Degraded, not broken.** If no key store is available (headless session, container, test), the identity still works for the current session; it simply will not be reloaded next time. The failure is recorded in `zia_last_error()`. Refusing to run at all would have made the engine unusable in those environments.
 
-Passwords and session tokens are therefore encrypted in transit, on top of the end-to-end encryption that already protects message content.
+## Verified by actually running it
 
-Note: embedding the address in the binary is a convenience, not a secret — it is readable with `strings` and visible in network traffic.
-
-## What is verified, and what is not
-
-**Verified by actually running it**
-- Crypto engine conformance on Linux and Windows: X3DH, Double Ratchet, out-of-order delivery, replay and tamper rejection, encrypted session persistence
-- Full-chain assembly (`e2e/`): C++ engine ↔ Dart client ↔ Fastify ↔ PostgreSQL — 7/7
-- **The Linux application was launched and driven**, including against the public HTTPS endpoint: account created (confirmed in the database), X3DH handshake, an encrypted message sent from the UI and decrypted by a peer
-- The server stores no plaintext — verified by SQL against the message table
-
-**Built and checked, but never launched**
-- The **Windows** and **macOS** applications are built by CI on their own runners, and their packages are verified to contain a self-contained engine. No Windows or macOS machine was available to run them.
+- New C++ persistence test: identity survives an engine restart, the signed prekey and its signature stay valid, regeneration is refused, and a different storage path yields a different identity
+- Engine conformance and persistence suites: **2/2**
+- Flutter suite (widget + FFI against the real engine): **5/5**
+- **End-to-end on the real application**: an account was created through the interface, the application was closed, relaunched, and reconnected with only a password. The database confirms **two sessions for a single device** — the identity was reused, no account was recreated
+- `identity.zia` was inspected on disk: opaque ciphertext, no key in the clear
 
 ## Known limitations
 
-- **Device identity is not persisted between launches.** The engine generates fresh keys at startup, so the app registers a new account each time it starts. Persisting identity through the OS key store is the next milestone.
+- The **Windows** and **macOS** applications are built by CI and their packages verified, but never launched — no such machine was available. Only Linux was exercised end to end.
 - Real-time delivery uses polling every 2 seconds; a WebSocket gateway is planned.
 - Windows and macOS builds are unsigned, so both systems warn on first launch.
 - iOS and Android are scaffolded but not published. iOS requires an Apple Developer account for signing and installation.
+- Message history is not stored locally yet: only the identity and account are persisted.
 
 ## Security
 
-Every cryptographic primitive comes from [libsodium](https://libsodium.org). Only the X3DH and Double Ratchet protocol logic is implemented here, following the published Signal specifications. No key is ever written in plaintext, and the server never holds one.
+Every cryptographic primitive comes from [libsodium](https://libsodium.org). Only the X3DH and Double Ratchet protocol logic is implemented here, following the published Signal specifications. Private keys never touch the disk unencrypted, and the server never holds one. The relay is reachable over HTTPS with a Let's Encrypt certificate.
