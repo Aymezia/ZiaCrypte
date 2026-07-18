@@ -32,3 +32,10 @@ ziacrypte.bundle
 # Binaires distribuables (fournis hors-git : download direct ou Releases)
 dist/
 *.zip
+
+# Binaires compilés
+*.exe
+*.dll
+
+# Clone imbriqué (test de bundle)
+/ZiaCrypte/

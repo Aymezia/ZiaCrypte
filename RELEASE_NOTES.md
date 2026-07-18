@@ -4,24 +4,25 @@ First public build of the ZiaCrypte cryptographic engine for Windows, with a sta
 
 ## Download
 
-**`ziacrypte-windows-x64.zip`**
+- **`zia_crypto_test.exe`** — standalone verifier, a single self-contained file. Download and run it, nothing else required.
+- **`ziacrypte-windows-x64.zip`** — the same exe plus the engine library, for developers.
 
-| File | Description |
+Everything is **self-contained**: libsodium and the C++ runtime are linked statically. No `libsodium-*.dll`, no MinGW runtime, no dependency to install.
+
+| File (in the zip) | Description |
 |------|-------------|
-| `zia_crypto.dll` | The engine — X3DH + Double Ratchet over libsodium, with the Windows DPAPI key store built in |
-| `libsodium-26.dll` | Runtime dependency (keep it next to the other files) |
-| `zia_crypto_test.exe` | Self-contained end-to-end conformance test |
+| `zia_crypto_test.exe` | Standalone end-to-end conformance test (single file) |
+| `zia_crypto.dll` | The engine, self-contained — X3DH + Double Ratchet + Windows DPAPI key store (the app loads it via FFI) |
+| `libzia_crypto.dll.a` | Import library to link against the DLL (MinGW) |
 | `README.txt` | How to run |
 
 ## How to run
 
-1. Unzip. Keep all files in the **same folder**.
-2. Open a command prompt (`cmd.exe`) in that folder.
-3. Run:
+Just run the single file — no companion files needed:
 
-   ```
-   zia_crypto_test.exe
-   ```
+```
+zia_crypto_test.exe
+```
 
 You should see every check pass:
 
