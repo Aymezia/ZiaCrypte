@@ -44,3 +44,6 @@ dist/
 .dart_tool/
 .packages
 pubspec.lock
+
+app/linux/flutter/ephemeral/
+app/.dart_tool/

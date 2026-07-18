@@ -16,8 +16,9 @@ dependencies:
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
   dio: ^5.7.0
-  flutter_secure_storage: ^9.2.2
   ffi: ^2.1.3
+  # flutter_secure_storage : à réintroduire (version à jour) quand on persistera
+  # les jetons de session. La 9.2.x casse le build Linux (json.hpp obsolète).
 
 dev_dependencies:
   flutter_test:
