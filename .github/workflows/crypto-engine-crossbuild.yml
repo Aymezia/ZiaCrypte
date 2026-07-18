@@ -1,0 +1,57 @@
+name: crypto-engine-crossbuild (experimental)
+
+# Build multiplateforme du moteur via vcpkg. DÉCLENCHEMENT MANUEL uniquement
+# (workflow_dispatch) : ces cibles n'ont pas encore été validées sur leurs
+# runners respectifs, donc elles ne bloquent pas les push. Chaque job est en
+# continue-on-error pour rester informatif sans faire échouer l'ensemble.
+# À promouvoir vers la CI bloquante au fur et à mesure de leur validation.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, preset: windows }
+          - { os: macos-latest, preset: macos }
+          - { os: macos-latest, preset: ios }
+          - { os: ubuntu-latest, preset: android-arm64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          # SHA de la release vcpkg 2026.06.24 (épingle la version des ports,
+          # dont libsodium). Doit correspondre au builtin-baseline de vcpkg.json.
+          vcpkgGitCommitId: '52c9e08cdf8580d2d9762f547d22b96fd81e82f2'
+
+      - name: Set up Android NDK
+        if: matrix.preset == 'android-arm64'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27
+
+      - name: Configure
+        working-directory: crypto-engine
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        working-directory: crypto-engine
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Upload library
+        uses: actions/upload-artifact@v4
+        with:
+          name: zia-crypto-${{ matrix.preset }}
+          path: |
+            crypto-engine/build/${{ matrix.preset }}/**/*.so
+            crypto-engine/build/${{ matrix.preset }}/**/*.dll
+            crypto-engine/build/${{ matrix.preset }}/**/*.dylib
+          if-no-files-found: ignore

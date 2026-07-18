@@ -1,9 +1,10 @@
 name: crypto-engine
 
-# Build matriciel du moteur C++ sur les 5 plateformes cibles. libsodium est
-# fourni par vcpkg (mode manifest, vcpkg.json) sur chaque runner. Le job Linux
-# est le seul à exécuter les tests ici (les autres se contentent de compiler ;
-# l'exécution iOS/Android exige un simulateur/émulateur, ajouté ultérieurement).
+# CI bloquante du moteur C++ : uniquement Linux, avec libsodium système (pas de
+# vcpkg), car c'est la configuration validée de bout en bout — build ET
+# exécution du test de conformité. Les autres plateformes (Windows/macOS/iOS/
+# Android), qui nécessitent des runners dédiés non encore validés, vivent dans
+# le workflow manuel crypto-engine-crossbuild.yml.
 
 on:
   push:
@@ -15,69 +16,31 @@ on:
       - 'crypto-engine/**'
 
 jobs:
-  build:
-    name: ${{ matrix.preset }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            preset: linux
-            run_tests: true
-          - os: windows-latest
-            preset: windows
-            run_tests: false
-          - os: macos-latest
-            preset: macos
-            run_tests: false
-          - os: macos-latest
-            preset: ios
-            run_tests: false
-          - os: ubuntu-latest
-            preset: android-arm64
-            run_tests: false
+  linux:
+    name: linux (build + test)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install vcpkg
-        uses: lukka/run-vcpkg@v11
-        with:
-          # TODO(Phase 8 local setup) : remplacer par un vrai SHA de commit du
-          # dépôt vcpkg (épingle la version des ports, dont libsodium). Le SHA
-          # tout-à-zéro est un placeholder volontaire — le pipeline échouera tant
-          # qu'il n'est pas renseigné, par sécurité (pas de version implicite).
-          vcpkgGitCommitId: '0000000000000000000000000000000000000000'
-
-      - name: Install Linux system deps (libsecret)
-        if: matrix.preset == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev
-
-      - name: Set up Android NDK
-        if: matrix.preset == 'android-arm64'
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r27
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libsodium-dev libsecret-1-dev \
+                                  gnome-keyring dbus-x11
 
       - name: Configure
         working-directory: crypto-engine
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset linux-system
 
       - name: Build
         working-directory: crypto-engine
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: cmake --build --preset linux-system
 
       - name: Test
-        if: matrix.run_tests
         working-directory: crypto-engine
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
-
-      - name: Upload library
-        uses: actions/upload-artifact@v4
-        with:
-          name: zia-crypto-${{ matrix.preset }}
-          path: |
-            crypto-engine/build/${{ matrix.preset }}/**/*.so
-            crypto-engine/build/${{ matrix.preset }}/**/*.dll
-            crypto-engine/build/${{ matrix.preset }}/**/*.dylib
-          if-no-files-found: ignore
+        # Le Secret Service (libsecret) est requis par le test de persistance de
+        # session ; dbus-run-session + gnome-keyring le fournissent en headless.
+        run: |
+          dbus-run-session -- bash -c '
+            echo "" | gnome-keyring-daemon --unlock --components=secrets
+            ctest --preset linux-system --output-on-failure'
