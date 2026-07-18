@@ -20,6 +20,24 @@ jobs:
   server:
     name: server (Node.js)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ziacrypte
+          POSTGRES_PASSWORD: changeme
+          POSTGRES_DB: ziacrypte
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ziacrypte:changeme@localhost:5432/ziacrypte
+      JWT_ACCESS_SECRET: ci-access-secret-0123456789
+      JWT_REFRESH_SECRET: ci-refresh-secret-0123456789
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,6 +51,9 @@ jobs:
       - name: Generate Prisma client
         working-directory: server
         run: npx prisma generate
+      - name: Apply schema to database
+        working-directory: server
+        run: npx prisma db push --skip-generate
       - name: Type-check / build
         working-directory: server
         run: npm run build
