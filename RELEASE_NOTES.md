@@ -1,22 +1,21 @@
-# ZiaCrypte v0.2.0 — the desktop app works
+# ZiaCrypte v0.2.1 — desktop apps for Linux, Windows and macOS
 
-First release of the **working application**, not just the engine: a Linux desktop client that registers, performs an X3DH handshake and exchanges Double Ratchet–encrypted messages through the relay server.
+The messaging application, now built for the three desktop platforms. Same encrypted core everywhere: keys are generated and held by the native C++ engine, and the server only ever relays opaque ciphertext.
 
 ## Downloads
 
-| Asset | What it is |
+| Asset | Platform |
 |---|---|
-| **`ziacrypte-linux-x64.tar.gz`** | The desktop application for Linux x64. libsodium is linked statically — nothing to install. |
-| `zia_crypto_test.exe` | Standalone Windows verifier for the crypto engine (single file). |
-| `ziacrypte-windows-x64.zip` | Windows engine library + verifier. |
+| **`ziacrypte-linux-x64.tar.gz`** | Linux x64 desktop app (libsodium linked statically — nothing to install) |
+| **`ziacrypte-windows-x64-app.zip`** | Windows x64 desktop app (includes `zia_crypto.dll` + `libsodium.dll`) |
+| **`ziacrypte-macos-app.zip`** | macOS desktop app (`.app` bundle with the engine in `Contents/Frameworks`) |
+| `zia_crypto_test.exe` | Standalone Windows verifier for the crypto engine |
 
 ## Run it
 
-```bash
-tar xzf ziacrypte-linux-x64.tar.gz
-cd linux-x64
-./ziacrypte
-```
+**Linux** — `tar xzf ziacrypte-linux-x64.tar.gz && cd linux-x64 && ./ziacrypte`
+**Windows** — unzip, keep all files together, run `ziacrypte.exe`
+**macOS** — unzip and open `ziacrypte.app` (unsigned: right-click → Open the first time)
 
 You also need a server:
 
@@ -27,33 +26,27 @@ npx prisma db push
 npx tsx src/index.ts      # listens on 3210
 ```
 
-In the app: enter the server address, pick a username and password, create your account, then type a peer's username to start a conversation.
+In the app: enter the server address, create an account, then type a peer's username to start a conversation.
 
-## What's in this release
+## What is verified, and what is not
 
-**Backend (Node.js + Fastify + Prisma + PostgreSQL)**
-- Accounts and authentication: Argon2id passwords, JWT access tokens, refresh tokens stored hashed with rotation and replay rejection
-- Devices and prekeys: multi-device registration, prekey upload, X3DH bundle distribution with one-time prekey consumption
-- Conversations and an encrypted blob relay with idempotent deduplication
-- User lookup
+Being precise about this matters more than sounding confident.
 
-**Desktop application (Flutter)**
-- Connection screen and conversation screen, Material 3, light and dark themes
-- Talks to the native engine through the Dart FFI layer; a dedicated isolate serialises every native call
-- The X3DH handshake material rides along with the first message of a session
+**Verified by actually running it**
+- Crypto engine conformance on Linux and Windows: X3DH, Double Ratchet, out-of-order delivery, replay rejection, tamper rejection, encrypted session persistence
+- Full-chain assembly (`e2e/`): C++ engine ↔ Dart client ↔ Fastify ↔ PostgreSQL — 7/7
+- **The Linux application was launched and driven**: account created (confirmed in the database), X3DH handshake, an encrypted message sent from the UI and decrypted by a peer
+- The server stores no plaintext — verified by SQL against the message table
 
-## Verified, not assumed
-
-- Crypto engine conformance: X3DH, Double Ratchet, out-of-order delivery, replay rejection, tampering rejection, encrypted session persistence
-- Full-chain assembly test (`e2e/`): C++ engine ↔ Dart client ↔ Fastify ↔ PostgreSQL — **7/7**
-- The application was **actually launched and driven**: account created (confirmed in the database), handshake completed, an encrypted message sent from the UI and decrypted by a peer
-- **The server stores no plaintext** — verified by SQL against the message table: zero occurrences
+**Built but not run**
+- The **Windows** and **macOS** applications are compiled by CI on their own runners, and the packages are checked to contain the engine and its dependencies. They have **not been launched** — no Windows or macOS machine was available. The engine DLL is MSVC-built and exports the full API.
 
 ## Known limitations
 
-- **Device identity is not persisted between launches.** The engine generates fresh keys at startup, so the app registers a new account each time it starts. Persisting identity through the OS key store is next.
+- **Device identity is not persisted between launches.** The engine generates fresh keys at startup, so the app registers a new account each time. Persisting identity through the OS key store is next.
 - Real-time delivery uses polling every 2 seconds; a WebSocket gateway is planned.
-- Windows and macOS desktop builds of the application are not published yet — only the engine is built for Windows.
+- iOS and Android are scaffolded but not built or published yet. iOS additionally requires an Apple Developer account for signing and installation.
+- macOS and Windows builds are unsigned, so both systems will warn on first launch.
 
 ## Security
 
