@@ -1,60 +1,60 @@
-# ZiaCrypte Crypto Engine — v0.1.0 (Windows x64)
+# ZiaCrypte v0.2.0 — the desktop app works
 
-First public build of the ZiaCrypte cryptographic engine for Windows, with a standalone conformance test you can run directly.
+First release of the **working application**, not just the engine: a Linux desktop client that registers, performs an X3DH handshake and exchanges Double Ratchet–encrypted messages through the relay server.
 
-## Download
+## Downloads
 
-- **`zia_crypto_test.exe`** — standalone verifier, a single self-contained file. Download and run it, nothing else required.
-- **`ziacrypte-windows-x64.zip`** — the same exe plus the engine library, for developers.
+| Asset | What it is |
+|---|---|
+| **`ziacrypte-linux-x64.tar.gz`** | The desktop application for Linux x64. libsodium is linked statically — nothing to install. |
+| `zia_crypto_test.exe` | Standalone Windows verifier for the crypto engine (single file). |
+| `ziacrypte-windows-x64.zip` | Windows engine library + verifier. |
 
-Everything is **self-contained**: libsodium and the C++ runtime are linked statically. No `libsodium-*.dll`, no MinGW runtime, no dependency to install.
+## Run it
 
-| File (in the zip) | Description |
-|------|-------------|
-| `zia_crypto_test.exe` | Standalone end-to-end conformance test (single file) |
-| `zia_crypto.dll` | The engine, self-contained — X3DH + Double Ratchet + Windows DPAPI key store (the app loads it via FFI) |
-| `libzia_crypto.dll.a` | Import library to link against the DLL (MinGW) |
-| `README.txt` | How to run |
-
-## How to run
-
-Just run the single file — no companion files needed:
-
-```
-zia_crypto_test.exe
+```bash
+tar xzf ziacrypte-linux-x64.tar.gz
+cd linux-x64
+./ziacrypte
 ```
 
-You should see every check pass:
+You also need a server:
 
-```
-[OK] X3DH handshake + first message decrypted
-[OK] Bob's reply decrypted by Alice
-[OK] 5 round trips (multiple DH ratchet steps) valid
-[OK] Session serialized/encrypted at rest, then restored
-[OK] Out-of-order delivery (C, A, B) handled via skipped keys
-[OK] Replay detected and rejected
-[OK] Tampered ciphertext rejected
-All conformance tests passed.
+```bash
+cd server
+cp .env.example .env      # set DATABASE_URL and the JWT secrets
+npx prisma db push
+npx tsx src/index.ts      # listens on 3210
 ```
 
-## What this build proves
+In the app: enter the server address, pick a username and password, create your account, then type a peer's username to start a conversation.
 
-- **Real end-to-end encryption**: two independent engine instances (Alice and Bob) complete an X3DH handshake and exchange messages through the Double Ratchet.
-- **Forward secrecy & post-compromise security**: keys advance on every message and every DH ratchet step.
-- **Resilience**: out-of-order messages are handled; replays and tampered ciphertext are rejected.
-- **Encrypted-at-rest sessions**: session state is serialized and encrypted with a per-device master key protected by **Windows DPAPI** — no key is ever written in plaintext.
+## What's in this release
 
-## Notes & limitations
+**Backend (Node.js + Fastify + Prisma + PostgreSQL)**
+- Accounts and authentication: Argon2id passwords, JWT access tokens, refresh tokens stored hashed with rotation and replay rejection
+- Devices and prekeys: multi-device registration, prekey upload, X3DH bundle distribution with one-time prekey consumption
+- Conversations and an encrypted blob relay with idempotent deduplication
+- User lookup
 
-- These binaries were **cross-compiled from Linux with MinGW-w64** and validated under **Wine**. On a native Windows CI they are built with CMake + vcpkg instead.
-- This is the **engine**, not the full messaging app. The Flutter user interface connects to this engine through an FFI layer that is under active development.
-- `zia_crypto.dll` is the exact library the app will load at runtime.
-- Reproducible build: `crypto-engine/scripts/build-windows-mingw.sh`.
+**Desktop application (Flutter)**
+- Connection screen and conversation screen, Material 3, light and dark themes
+- Talks to the native engine through the Dart FFI layer; a dedicated isolate serialises every native call
+- The X3DH handshake material rides along with the first message of a session
+
+## Verified, not assumed
+
+- Crypto engine conformance: X3DH, Double Ratchet, out-of-order delivery, replay rejection, tampering rejection, encrypted session persistence
+- Full-chain assembly test (`e2e/`): C++ engine ↔ Dart client ↔ Fastify ↔ PostgreSQL — **7/7**
+- The application was **actually launched and driven**: account created (confirmed in the database), handshake completed, an encrypted message sent from the UI and decrypted by a peer
+- **The server stores no plaintext** — verified by SQL against the message table: zero occurrences
+
+## Known limitations
+
+- **Device identity is not persisted between launches.** The engine generates fresh keys at startup, so the app registers a new account each time it starts. Persisting identity through the OS key store is next.
+- Real-time delivery uses polling every 2 seconds; a WebSocket gateway is planned.
+- Windows and macOS desktop builds of the application are not published yet — only the engine is built for Windows.
 
 ## Security
 
-Built entirely on [libsodium](https://libsodium.org). No cryptographic primitive is implemented by hand — only the X3DH and Double Ratchet protocol logic, per the published Signal specifications.
-
----
-
-*SHA-256 checksums are printed by the release workflow; verify your download before running.*
+Every cryptographic primitive comes from [libsodium](https://libsodium.org). Only the X3DH and Double Ratchet protocol logic is implemented here, following the published Signal specifications. No key is ever written in plaintext, and the server never holds one.
