@@ -5,6 +5,7 @@ add_library(zia_crypto SHARED
     ratchet.cpp
     session.cpp
     primitives/primitives.cpp
+    storage/identity_store.cpp
 )
 
 target_include_directories(zia_crypto

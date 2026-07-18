@@ -2,6 +2,7 @@
 #include "engine_internal.hpp"
 #include "primitives/primitives.hpp"
 #include "ratchet/ratchet_state.hpp"
+#include "storage/identity_store.hpp"
 
 #include <sodium.h>
 #include <cstring>
@@ -39,6 +40,7 @@ ZIA_API ZiaStatus zia_prekey_bundle_rotate(ZiaEngine* engine) {
     primitives::x25519_keypair(spk.public_key, spk.private_key);
     primitives::ed25519_sign(engine->identity_private, spk.public_key, ZIA_PUBLIC_KEY_LEN, spk.signature);
     engine->signed_prekey = std::move(spk);
+    storage::save_identity(*engine);
     return ZIA_OK;
 }
 
@@ -54,6 +56,9 @@ ZIA_API ZiaStatus zia_prekey_bundle_generate(ZiaEngine* engine, ZiaPrekeyBundle*
     ZiaOneTimePrekey otpk;
     primitives::x25519_keypair(otpk.public_key, otpk.private_key);
     engine->one_time_prekeys.push_back(std::move(otpk));
+    // La clé privée de cette prekey sera nécessaire au handshake entrant, même
+    // après un redémarrage : on la persiste avant de publier la clé publique.
+    storage::save_identity(*engine);
 
     std::memcpy(out_bundle->identity_key, engine->identity_public, ZIA_PUBLIC_KEY_LEN);
     std::memcpy(out_bundle->signed_prekey, engine->signed_prekey->public_key, ZIA_PUBLIC_KEY_LEN);
@@ -166,7 +171,10 @@ ZIA_API ZiaStatus zia_session_accept_handshake(ZiaEngine* engine, const ZiaHands
     ratchet::init_as_responder(*session, sk, engine->signed_prekey->public_key,
                                 engine->signed_prekey->private_key);
 
-    if (otpk) otpk->consumed = true; // jamais réutilisée, cf. Phase 1 §7.6
+    if (otpk) {
+        otpk->consumed = true; // jamais réutilisée, cf. Phase 1 §7.6
+        storage::save_identity(*engine); // la consommation doit survivre au redémarrage
+    }
 
     sodium_memzero(dh1, sizeof(dh1));
     sodium_memzero(dh2, sizeof(dh2));

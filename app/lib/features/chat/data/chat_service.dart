@@ -5,6 +5,9 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import '../../../core/config/app_config.dart';
+import '../../../core/config/app_storage.dart';
+import '../../../core/ffi/zia_crypto_exceptions.dart';
 import '../../../core/network/api_client.dart';
 import '../domain/crypto_models.dart';
 import 'envelope.dart';
@@ -94,28 +97,41 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Compte déjà associé à cet appareil, s'il existe (permet la reconnexion).
+  SavedAccount? get savedAccount => AppStorage.loadAccount();
+
+  /// Ouvre le moteur natif sur le stockage permanent de l'appareil. L'identité
+  /// y est rechargée si elle existe déjà ; sinon elle est créée puis persistée.
+  Future<FfiCryptoGateway> _openGateway() async {
+    final gateway = await FfiCryptoGateway.open(
+      AppStorage.engineStoragePath,
+      libraryPath: _resolveLibrary(),
+    );
+    try {
+      await gateway.identityPublicKey(); // déjà présente
+    } on ZiaNotInitializedException {
+      await gateway.generateIdentity();
+    }
+    return gateway;
+  }
+
   /// Crée un compte et son appareil, puis publie les prekeys.
   Future<void> registerAndConnect({
-    required String serverUrl,
     required String user,
     required String password,
+    String? serverUrl,
   }) async {
     _setBusy(true);
     try {
-      final api = ApiClient(serverUrl);
-      final gateway = await FfiCryptoGateway.open(
-        '${Directory.systemTemp.path}/ziacrypte_$user',
-        libraryPath: _resolveLibrary(),
-      );
-
-      await gateway.generateIdentity();
+      final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
+      final gateway = await _openGateway();
       final bundle = await gateway.generatePrekeyBundle();
 
       final res = await api.register(
         username: user,
         password: password,
         device: {
-          'platform': 'linux',
+          'platform': _platformName(),
           'deviceName': 'desktop',
           'identityPublicKey': base64Encode(bundle.identityKey),
           'signedPrekey': base64Encode(bundle.signedPrekey),
@@ -124,19 +140,75 @@ class ChatService extends ChangeNotifier {
         },
       );
 
-      api.accessToken = res['accessToken'] as String;
-      _api = api;
-      _gateway = gateway;
-      username = user;
-      userId = res['userId'] as String;
-      deviceId = res['deviceId'] as String;
-
-      _startPolling();
+      _adoptSession(api, gateway, res, user);
+      // Mémorise le compte pour permettre la reconnexion au prochain lancement.
+      AppStorage.saveAccount(SavedAccount(
+        username: user,
+        userId: userId!,
+        deviceId: deviceId!,
+      ));
       _setBusy(false);
     } catch (e) {
       _setBusy(false, err: _humanize(e));
       rethrow;
     }
+  }
+
+  /// Reconnecte l'appareil à son compte existant : l'identité et les prekeys
+  /// sont déjà sur place, seul le mot de passe est redemandé.
+  Future<void> loginAndConnect({required String password, String? serverUrl}) async {
+    final account = savedAccount;
+    if (account == null) {
+      _setBusy(false, err: 'Aucun compte enregistré sur cet appareil.');
+      return;
+    }
+    _setBusy(true);
+    try {
+      final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
+      final gateway = await _openGateway();
+
+      final res = await api.login(
+        username: account.username,
+        password: password,
+        deviceId: account.deviceId,
+      );
+
+      _adoptSession(api, gateway, res, account.username);
+      _setBusy(false);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+      rethrow;
+    }
+  }
+
+  /// Oublie le compte local et revient à l'écran d'accueil.
+  void forgetAccount() {
+    AppStorage.clearAccount();
+    error = null;
+    notifyListeners();
+  }
+
+  void _adoptSession(
+    ApiClient api,
+    FfiCryptoGateway gateway,
+    Map<String, dynamic> res,
+    String user,
+  ) {
+    api.accessToken = res['accessToken'] as String;
+    _api = api;
+    _gateway = gateway;
+    username = user;
+    userId = res['userId'] as String;
+    deviceId = res['deviceId'] as String;
+    _startPolling();
+  }
+
+  static String _platformName() {
+    if (Platform.isWindows) return 'windows';
+    if (Platform.isMacOS) return 'macos';
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    return 'linux';
   }
 
   /// Ouvre une conversation avec un correspondant et initie le handshake X3DH.

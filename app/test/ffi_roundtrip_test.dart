@@ -31,8 +31,13 @@ void main() {
     late FfiCryptoGateway bob;
 
     setUp(() async {
-      alice = await FfiCryptoGateway.open('/tmp/zia_test_a', libraryPath: libPath);
-      bob = await FfiCryptoGateway.open('/tmp/zia_test_b', libraryPath: libPath);
+      // Stockage neuf à chaque test : l'identité étant désormais persistée,
+      // un dossier partagé ferait échouer generateIdentity() au 2e passage.
+      final unique = DateTime.now().microsecondsSinceEpoch;
+      alice = await FfiCryptoGateway.open('${Directory.systemTemp.path}/zia_t_a_$unique',
+          libraryPath: libPath);
+      bob = await FfiCryptoGateway.open('${Directory.systemTemp.path}/zia_t_b_$unique',
+          libraryPath: libPath);
       await alice.generateIdentity();
       await bob.generateIdentity();
     });
