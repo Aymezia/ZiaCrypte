@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../chat/data/chat_service.dart';
 
 /// Écran d'entrée : adresse du serveur + création de compte.
@@ -13,7 +14,7 @@ class ConnectScreen extends StatefulWidget {
 }
 
 class _ConnectScreenState extends State<ConnectScreen> {
-  final _server = TextEditingController(text: 'http://127.0.0.1:3210');
+  final _server = TextEditingController(text: AppConfig.serverUrl);
   final _username = TextEditingController();
   final _password = TextEditingController(text: 'password123');
   final _formKey = GlobalKey<FormState>();
@@ -71,17 +72,48 @@ class _ConnectScreenState extends State<ConnectScreen> {
                           style: theme.textTheme.bodyMedium?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant)),
                       const SizedBox(height: 32),
-                      TextFormField(
-                        controller: _server,
-                        decoration: const InputDecoration(
-                          labelText: 'Adresse du serveur',
-                          prefixIcon: Icon(Icons.dns_outlined),
-                          border: OutlineInputBorder(),
+                      // L'adresse du serveur est fixée à la compilation : le
+                      // champ n'apparaît qu'en mode développement.
+                      if (AppConfig.allowServerOverride) ...[
+                        TextFormField(
+                          controller: _server,
+                          decoration: const InputDecoration(
+                            labelText: 'Adresse du serveur',
+                            prefixIcon: Icon(Icons.dns_outlined),
+                            border: OutlineInputBorder(),
+                          ),
+                          validator: (v) =>
+                              (v == null || v.isEmpty) ? 'Adresse requise' : null,
                         ),
-                        validator: (v) =>
-                            (v == null || v.isEmpty) ? 'Adresse requise' : null,
-                      ),
-                      const SizedBox(height: 16),
+                        const SizedBox(height: 16),
+                      ],
+                      if (AppConfig.isInsecureTransport) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.tertiaryContainer,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.warning_amber_rounded,
+                                  size: 20,
+                                  color: theme.colorScheme.onTertiaryContainer),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Liaison non chiffrée (HTTP) : tes messages restent '
+                                  'chiffrés, mais ton mot de passe circule en clair.',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: theme.colorScheme.onTertiaryContainer),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       TextFormField(
                         controller: _username,
                         decoration: const InputDecoration(

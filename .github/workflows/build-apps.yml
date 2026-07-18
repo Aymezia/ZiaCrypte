@@ -11,22 +11,47 @@ on:
     types: [published]
 
 jobs:
+  # Le moteur pour Windows est cross-compilé depuis Linux avec MinGW et lié
+  # STATIQUEMENT (libsodium + runtimes C++). Un build sur le runner Windows
+  # produisait une DLL réclamant libgcc_s_seh-1.dll / libstdc++-6.dll, absentes
+  # de la machine cible : l'application échouait au chargement (erreur 126).
+  engine-windows:
+    name: Moteur Windows (autonome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MinGW
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 curl make
+      - name: Cross-build
+        run: ./crypto-engine/scripts/build-windows-mingw.sh
+      - name: Vérifier l'autonomie de la DLL
+        run: |
+          set -euo pipefail
+          DLL=dist/windows-x64/zia_crypto.dll
+          test -f "$DLL"
+          # Aucune dépendance hors DLL système Windows.
+          if x86_64-w64-mingw32-objdump -p "$DLL" | grep -qiE "libgcc|libstdc\+\+|libsodium"; then
+            echo "La DLL n'est pas autonome :"; x86_64-w64-mingw32-objdump -p "$DLL" | grep "DLL Name"
+            exit 1
+          fi
+          x86_64-w64-mingw32-objdump -p "$DLL" | grep "DLL Name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-windows-dll
+          path: dist/windows-x64/zia_crypto.dll
+
   windows:
     name: Application Windows
     runs-on: windows-latest
+    needs: engine-windows
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install vcpkg
-        uses: lukka/run-vcpkg@v11
+      - name: Récupérer le moteur autonome
+        uses: actions/download-artifact@v4
         with:
-          vcpkgGitCommitId: '52c9e08cdf8580d2d9762f547d22b96fd81e82f2'
-
-      - name: Build crypto engine (MSVC + vcpkg)
-        working-directory: crypto-engine
-        run: |
-          cmake --preset windows
-          cmake --build --preset windows
+          name: engine-windows-dll
+          path: engine-dll
 
       - uses: subosito/flutter-action@v2
         with:
@@ -45,18 +70,10 @@ jobs:
           $ErrorActionPreference = "Stop"
           $bundle = "app/build/windows/x64/runner/Release"
 
-          # CMake nomme la bibliothèque libzia_crypto.dll ; l'application la
-          # cherche sous le nom zia_crypto.dll, à côté de l'exécutable.
-          $engine = Get-ChildItem -Recurse -Path crypto-engine/build -Filter "*zia_crypto.dll" |
-                    Select-Object -First 1
-          if (-not $engine) { throw "moteur introuvable : *zia_crypto.dll" }
-          Copy-Item $engine.FullName "$bundle/zia_crypto.dll"
-
-          # libsodium est fourni en DLL par vcpkg : dépendance runtime obligatoire.
-          $sodium = Get-ChildItem -Recurse -Path crypto-engine/build -Filter "libsodium*.dll" |
-                    Select-Object -First 1
-          if (-not $sodium) { throw "libsodium.dll introuvable" }
-          Copy-Item $sodium.FullName "$bundle/"
+          # Moteur autonome produit par le job engine-windows (libsodium et les
+          # runtimes C++ sont liés statiquement : rien d'autre à livrer).
+          if (-not (Test-Path "engine-dll/zia_crypto.dll")) { throw "moteur introuvable" }
+          Copy-Item "engine-dll/zia_crypto.dll" "$bundle/zia_crypto.dll"
 
           # Vérification : l'archive doit contenir l'exécutable ET le moteur.
           foreach ($f in @("ziacrypte.exe", "zia_crypto.dll")) {
