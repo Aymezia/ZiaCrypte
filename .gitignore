@@ -39,3 +39,8 @@ dist/
 
 # Clone imbriqué (test de bundle)
 /ZiaCrypte/
+
+# Dart tooling
+.dart_tool/
+.packages
+pubspec.lock

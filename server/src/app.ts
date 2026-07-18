@@ -2,7 +2,9 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { HttpError } from './lib/errors.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
+import { conversationsRoutes } from './modules/conversations/conversations.routes.js';
 import { devicesRoutes } from './modules/devices/devices.routes.js';
+import { messagesRoutes } from './modules/messages/messages.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? 'info' } });
@@ -24,6 +26,8 @@ export function buildApp(): FastifyInstance {
     async (v1) => {
       await authRoutes(v1);
       await devicesRoutes(v1);
+      await conversationsRoutes(v1);
+      await messagesRoutes(v1);
     },
     { prefix: '/v1' },
   );
