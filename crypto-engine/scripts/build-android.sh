@@ -30,6 +30,29 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 echo ">> Sources libsodium ${SODIUM_VERSION}"
+
+
+# Garde-fou : toute fonction déclarée dans l'en-tête public DOIT être exportée.
+# La liste de sources ci-dessus est maintenue à la main ; sans ce contrôle, un
+# fichier oublié produit une bibliothèque qui se compile, se lie et s'empaquette
+# — puis fait échouer l'application au démarrage sur un symbole manquant.
+#
+# Prend en argument un FICHIER contenant les noms exportés (un par ligne) :
+# extraire ces noms dépend du format binaire, c'est à l'appelant de le faire.
+check_exported_symbols() {
+  local exported="$1" missing=""
+  for sym in $(grep -oE 'zia_[a-z_]+\(' "$ROOT/include/zia/zia_crypto.h" | tr -d '(' | sort -u); do
+    grep -qx "$sym" "$exported" || missing="$missing $sym"
+  done
+  if [ -n "$missing" ]; then
+    echo "ERREUR : symboles déclarés dans l'en-tête mais absents de la bibliothèque :"
+    for s in $missing; do echo "  - $s"; done
+    echo "Ajoute le fichier source correspondant à la liste de compilation."
+    exit 1
+  fi
+  echo "   tous les symboles publics sont exportés"
+}
+
 curl -sSL -o "$WORK/libsodium.tar.gz" \
   "https://download.libsodium.org/libsodium/releases/libsodium-${SODIUM_VERSION}-stable.tar.gz"
 tar xzf "$WORK/libsodium.tar.gz" -C "$WORK"
@@ -71,11 +94,15 @@ for abi in "${ABIS[@]}"; do
     "$ROOT/src/primitives/primitives.cpp" \
     "$ROOT/src/storage/identity_store.cpp" "$ROOT/src/storage/secure_blob.cpp" \
     "$ROOT/src/vault.cpp" "$ROOT/src/attachment.cpp" \
+    "$ROOT/src/safety_number.cpp" \
     "$ROOT/platform/android/secure_key_store_android.cpp" \
     -o "$out_dir/libzia_crypto.so" \
     "$sodium_prefix/lib/libsodium.a" -llog
 
   "$TOOLCHAIN/bin/llvm-strip" --strip-unneeded "$out_dir/libzia_crypto.so"
+  "$TOOLCHAIN/bin/llvm-nm" --dynamic --defined-only "$out_dir/libzia_crypto.so" \
+    | grep -oE '\bzia_[a-z_]+\b' | sort -u > "$WORK/exported_$abi.txt"
+  check_exported_symbols "$WORK/exported_$abi.txt"
   echo "   $(ls -lh "$out_dir/libzia_crypto.so" | awk '{print $5}')"
 done
 
