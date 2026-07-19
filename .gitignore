@@ -50,3 +50,7 @@ app/.dart_tool/
 
 # Bibliothèques natives Android (générées par build-android.sh)
 app/android/app/src/main/jniLibs/
+
+# Corpus et journaux de fuzzing (régénérés, jamais versionnés)
+crypto-engine/build/fuzz-corpus/
+crypto-engine/crash-*

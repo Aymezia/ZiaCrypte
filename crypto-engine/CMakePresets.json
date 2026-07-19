@@ -1,6 +1,10 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -22,25 +26,40 @@
     {
       "name": "linux",
       "displayName": "Linux (x64, vcpkg)",
-      "inherits": ["base", "vcpkg"],
-      "cacheVariables": { "VCPKG_TARGET_TRIPLET": "x64-linux" }
+      "inherits": [
+        "base",
+        "vcpkg"
+      ],
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
     },
     {
       "name": "linux-system",
       "displayName": "Linux (libsodium système, sans vcpkg)",
-      "inherits": ["base"],
+      "inherits": [
+        "base"
+      ],
       "description": "Poste de dev / CI légère : utilise le repli pkg-config du CMakeLists"
     },
     {
       "name": "windows",
       "displayName": "Windows (x64, vcpkg)",
-      "inherits": ["base", "vcpkg"],
-      "cacheVariables": { "VCPKG_TARGET_TRIPLET": "x64-windows" }
+      "inherits": [
+        "base",
+        "vcpkg"
+      ],
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
     },
     {
       "name": "macos",
       "displayName": "macOS (universal, vcpkg)",
-      "inherits": ["base", "vcpkg"],
+      "inherits": [
+        "base",
+        "vcpkg"
+      ],
       "cacheVariables": {
         "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
         "VCPKG_TARGET_TRIPLET": "x64-osx"
@@ -49,7 +68,10 @@
     {
       "name": "ios",
       "displayName": "iOS (arm64, vcpkg)",
-      "inherits": ["base", "vcpkg"],
+      "inherits": [
+        "base",
+        "vcpkg"
+      ],
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "iOS",
         "CMAKE_OSX_ARCHITECTURES": "arm64",
@@ -59,24 +81,98 @@
     {
       "name": "android-arm64",
       "displayName": "Android (arm64-v8a, NDK + vcpkg)",
-      "inherits": ["base", "vcpkg"],
+      "inherits": [
+        "base",
+        "vcpkg"
+      ],
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "Android",
         "CMAKE_ANDROID_ARCH_ABI": "arm64-v8a",
         "VCPKG_TARGET_TRIPLET": "arm64-android"
       }
+    },
+    {
+      "name": "linux-sanitizers",
+      "displayName": "Linux + ASan/UBSan (clang)",
+      "inherits": [
+        "base"
+      ],
+      "description": "Détecte les corruptions mémoire et les comportements indéfinis sur les chemins qui analysent des données venues du réseau",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
+      "name": "linux-fuzz",
+      "displayName": "Linux + libFuzzer (clang)",
+      "inherits": [
+        "base"
+      ],
+      "description": "Fuzzing des points d'entrée qui analysent des octets venus du réseau",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ZIA_BUILD_FUZZERS": "ON",
+        "CMAKE_C_FLAGS": "-fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "linux", "configurePreset": "linux" },
-    { "name": "linux-system", "configurePreset": "linux-system" },
-    { "name": "windows", "configurePreset": "windows" },
-    { "name": "macos", "configurePreset": "macos" },
-    { "name": "ios", "configurePreset": "ios" },
-    { "name": "android-arm64", "configurePreset": "android-arm64" }
+    {
+      "name": "linux",
+      "configurePreset": "linux"
+    },
+    {
+      "name": "linux-system",
+      "configurePreset": "linux-system"
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows"
+    },
+    {
+      "name": "macos",
+      "configurePreset": "macos"
+    },
+    {
+      "name": "ios",
+      "configurePreset": "ios"
+    },
+    {
+      "name": "android-arm64",
+      "configurePreset": "android-arm64"
+    },
+    {
+      "name": "linux-sanitizers",
+      "configurePreset": "linux-sanitizers"
+    },
+    {
+      "name": "linux-fuzz",
+      "configurePreset": "linux-fuzz"
+    }
   ],
   "testPresets": [
-    { "name": "linux", "configurePreset": "linux" },
-    { "name": "linux-system", "configurePreset": "linux-system" }
+    {
+      "name": "linux",
+      "configurePreset": "linux"
+    },
+    {
+      "name": "linux-system",
+      "configurePreset": "linux-system"
+    },
+    {
+      "name": "linux-sanitizers",
+      "configurePreset": "linux-sanitizers"
+    }
   ]
 }

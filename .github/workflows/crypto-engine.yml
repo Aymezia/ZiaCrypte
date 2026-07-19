@@ -44,3 +44,51 @@ jobs:
           dbus-run-session -- bash -c '
             echo "" | gnome-keyring-daemon --unlock --components=secrets
             ctest --preset linux-system --output-on-failure'
+
+  # Désinfecteurs + fuzzing sur les points d'entrée qui reçoivent des octets
+  # venus de l'extérieur. Les tests de conformité n'exercent que des entrées
+  # valides : ils vérifient que le protocole fonctionne, pas qu'il résiste à ce
+  # qui est malformé.
+  hardening:
+    name: linux (ASan/UBSan + fuzzing)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm cmake ninja-build libsodium-dev libsecret-1-dev
+
+      # Aucun service de trousseau n'existe sur un runner. Le moteur doit
+      # échouer franchement plutôt que d'attendre indéfiniment — un délai court
+      # rend le défaut visible ici s'il revenait.
+      - name: Build + test sous ASan/UBSan
+        env:
+          ZIA_KEYSTORE_TIMEOUT_SECONDS: 2
+        run: |
+          cd crypto-engine
+          cmake --preset linux-sanitizers
+          cmake --build build/linux-sanitizers -j"$(nproc)"
+          ctest --test-dir build/linux-sanitizers --output-on-failure
+
+      - name: Fuzzing (budget court)
+        env:
+          ZIA_KEYSTORE_TIMEOUT_SECONDS: 2
+        run: |
+          cd crypto-engine
+          cmake --preset linux-fuzz
+          cmake --build build/linux-fuzz -j"$(nproc)"
+          ./scripts/run-fuzzers.sh "${ZIA_FUZZ_SECONDS:-120}"
+
+      # Les entrées fautives sont l'unique moyen de rejouer un défaut trouvé :
+      # sans elles, le rapport d'échec ne sert à rien.
+      - name: Conserver les entrées fautives
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            crypto-engine/crash-*
+            crypto-engine/build/linux-fuzz/fuzz.log
+          if-no-files-found: ignore

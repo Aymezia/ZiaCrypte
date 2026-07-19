@@ -9,7 +9,12 @@
 
 #include <libsecret/secret.h>
 #include <sodium.h>
+#include <chrono>
+#include <condition_variable>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace zia::crypto::storage {
@@ -27,11 +32,69 @@ const SecretSchema* schema() {
     return &s;
 }
 
+/* Délai maximal accordé au Secret Service, en secondes. */
+unsigned timeout_seconds() {
+    if (const char* v = std::getenv("ZIA_KEYSTORE_TIMEOUT_SECONDS")) {
+        const int parsed = std::atoi(v);
+        if (parsed > 0) return static_cast<unsigned>(parsed);
+    }
+    return 5;
+}
+
+/* Annulation automatique après un délai.
+ *
+ * Les appels synchrones de libsecret prennent un GCancellable ; en lui passant
+ * `nullptr`, on s'en remet entièrement au service d'en face. Or il existe un cas
+ * très courant où celui-ci ne répond JAMAIS : un bus de session est présent,
+ * mais aucun démon ne sert org.freedesktop.secrets — serveur sans interface
+ * graphique, bureau minimal, machine d'intégration continue. L'appel restait
+ * alors bloqué indéfiniment, et l'application gelait au démarrage sans le
+ * moindre message.
+ *
+ * Un échec franc vaut mieux : l'appelant peut le signaler, et le moteur
+ * continue sans persistance plutôt que de se figer. */
+class TimedCancellable {
+public:
+    explicit TimedCancellable(unsigned seconds)
+        : cancellable_(g_cancellable_new()) {
+        watcher_ = std::thread([this, seconds] {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (!done_.wait_for(lock, std::chrono::seconds(seconds),
+                                [this] { return finished_; })) {
+                g_cancellable_cancel(cancellable_);
+            }
+        });
+    }
+
+    ~TimedCancellable() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            finished_ = true;
+        }
+        done_.notify_all();
+        if (watcher_.joinable()) watcher_.join();
+        g_object_unref(cancellable_);
+    }
+
+    TimedCancellable(const TimedCancellable&) = delete;
+    TimedCancellable& operator=(const TimedCancellable&) = delete;
+
+    GCancellable* get() const { return cancellable_; }
+
+private:
+    GCancellable* cancellable_;
+    std::thread watcher_;
+    std::mutex mutex_;
+    std::condition_variable done_;
+    bool finished_ = false;
+};
+
 class LinuxSecureKeyStore : public SecureKeyStore {
 public:
     bool has_master_key() override {
         GError* error = nullptr;
-        gchar* password = secret_password_lookup_sync(schema(), nullptr, &error,
+        TimedCancellable deadline(timeout_seconds());
+        gchar* password = secret_password_lookup_sync(schema(), deadline.get(), &error,
                                                         "engine", "ziacrypte", nullptr);
         bool found = password != nullptr;
         // secret_password_wipe() efface le contenu MAIS ne libère pas le buffer
@@ -55,9 +118,10 @@ public:
                            sodium_base64_VARIANT_ORIGINAL);
 
         GError* error = nullptr;
+        TimedCancellable deadline(timeout_seconds());
         gboolean ok = secret_password_store_sync(schema(), SECRET_COLLECTION_DEFAULT,
                                                    "Clé maîtresse ZiaCrypte", encoded.data(),
-                                                   nullptr, &error, "engine", "ziacrypte", nullptr);
+                                                   deadline.get(), &error, "engine", "ziacrypte", nullptr);
         sodium_memzero(encoded.data(), encoded.size());
         if (error) {
             g_error_free(error);
@@ -68,7 +132,8 @@ public:
 
     bool load_master_key(SecureBuffer& out_key) override {
         GError* error = nullptr;
-        gchar* password = secret_password_lookup_sync(schema(), nullptr, &error,
+        TimedCancellable deadline(timeout_seconds());
+        gchar* password = secret_password_lookup_sync(schema(), deadline.get(), &error,
                                                         "engine", "ziacrypte", nullptr);
         if (error) {
             g_error_free(error);
@@ -88,7 +153,8 @@ public:
 
     bool delete_master_key() override {
         GError* error = nullptr;
-        gboolean ok = secret_password_clear_sync(schema(), nullptr, &error,
+        TimedCancellable deadline(timeout_seconds());
+        gboolean ok = secret_password_clear_sync(schema(), deadline.get(), &error,
                                                    "engine", "ziacrypte", nullptr);
         if (error) {
             g_error_free(error);

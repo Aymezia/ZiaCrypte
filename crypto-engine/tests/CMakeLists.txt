@@ -18,3 +18,18 @@ target_include_directories(zia_safety_number_test PRIVATE ${CMAKE_SOURCE_DIR}/sr
 target_link_libraries(zia_safety_number_test PRIVATE zia_crypto zia::sodium)
 
 add_test(NAME safety_number COMMAND zia_safety_number_test)
+
+# Fuzzers : construits uniquement sous le preset dédié (clang + libFuzzer).
+# Ils ne font pas partie de `ctest` — un fuzzer n'a pas de fin, il tourne sur
+# un budget de temps.
+if(ZIA_BUILD_FUZZERS)
+  # Générateur de graines : produit des artefacts VALIDES que le fuzzer déforme
+  # ensuite. Sans lui, il passe son budget à redécouvrir la structure des
+  # entrées au lieu d'explorer les chemins profonds.
+  add_executable(zia_fuzz_seed_corpus fuzz_seed_corpus.cpp)
+  target_link_libraries(zia_fuzz_seed_corpus PRIVATE zia_crypto zia::sodium)
+
+  add_executable(zia_fuzz_parsers fuzz_parsers.cpp)
+  target_link_libraries(zia_fuzz_parsers PRIVATE zia_crypto zia::sodium)
+  target_link_options(zia_fuzz_parsers PRIVATE -fsanitize=fuzzer)
+endif()
