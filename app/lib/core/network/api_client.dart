@@ -194,6 +194,15 @@ class ApiClient {
     return Uint8List.fromList(res.data ?? const []);
   }
 
+  /// Identifiants (parmi ceux fournis) de messages ENVOYÉS déjà remis à un
+  /// appareil du correspondant. Le serveur ne renvoie que ceux de cet appareil.
+  Future<List<String>> deliveredAmong(List<String> clientMessageIds) async {
+    if (clientMessageIds.isEmpty) return const [];
+    final res = await _dio.get<Map<String, dynamic>>('/v1/messages/status',
+        queryParameters: {'ids': clientMessageIds.join(',')});
+    return ((res.data?['delivered'] as List?) ?? const []).cast<String>();
+  }
+
   /// Relève les blobs chiffrés en attente pour l'appareil courant.
   Future<List<Map<String, dynamic>>> fetchMessages() async {
     final res = await _dio.get<List<dynamic>>('/v1/messages');

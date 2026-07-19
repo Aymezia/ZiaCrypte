@@ -560,6 +560,27 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Un message contenant un fichier : cliquer le télécharge et le déchiffre.
+  /// Petit indicateur sous un message envoyé : une coche « envoyé », deux
+  /// coches « remis à un appareil du correspondant ». Volontairement discret —
+  /// c'est une confirmation, pas un contenu.
+  Widget _deliveryTick(ThemeData theme, ChatMessage m) {
+    final couleur = theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, right: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(m.delivered ? Icons.done_all : Icons.done, size: 13, color: couleur),
+          const SizedBox(width: 3),
+          Text(
+            m.delivered ? 'Remis' : 'Envoyé',
+            style: TextStyle(fontSize: 10, color: couleur),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _attachmentBubble(ThemeData theme, ChatMessage m) {
     final ref = m.attachment!;
     final color = m.mine
@@ -616,27 +637,35 @@ class _ChatScreenState extends State<ChatScreen> {
                     return Align(
                       alignment:
                           m.mine ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
-                        constraints: const BoxConstraints(maxWidth: 480),
-                        decoration: BoxDecoration(
-                          color: m.mine
-                              ? theme.colorScheme.primaryContainer
-                              : theme.colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: m.hasAttachment
-                            ? _attachmentBubble(theme, m)
-                            : Text(
-                                m.text,
-                                style: TextStyle(
-                                  color: m.mine
-                                      ? theme.colorScheme.onPrimaryContainer
-                                      : theme.colorScheme.onSurface,
-                                ),
-                              ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            constraints: const BoxConstraints(maxWidth: 480),
+                            decoration: BoxDecoration(
+                              color: m.mine
+                                  ? theme.colorScheme.primaryContainer
+                                  : theme.colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: m.hasAttachment
+                                ? _attachmentBubble(theme, m)
+                                : Text(
+                                    m.text,
+                                    style: TextStyle(
+                                      color: m.mine
+                                          ? theme.colorScheme.onPrimaryContainer
+                                          : theme.colorScheme.onSurface,
+                                    ),
+                                  ),
+                          ),
+                          if (m.mine && m.pendingReceiptIds.isNotEmpty)
+                            _deliveryTick(theme, m),
+                        ],
                       ),
                     );
                   },

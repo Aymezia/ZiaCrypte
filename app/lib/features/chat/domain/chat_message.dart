@@ -8,6 +8,8 @@ class ChatMessage {
     required this.mine,
     required this.at,
     this.attachment,
+    this.pendingReceiptIds = const [],
+    this.delivered = false,
   });
 
   final String text;
@@ -18,6 +20,15 @@ class ChatMessage {
   /// après téléchargement ; elle n'a jamais quitté le canal chiffré.
   final AttachmentRef? attachment;
 
+  /// Pour un message envoyé : les identifiants de blob à confirmer, un par
+  /// appareil du correspondant (mes propres appareils sont exclus — leur
+  /// relève ne prouve pas que le destinataire a reçu). Vide sinon.
+  final List<String> pendingReceiptIds;
+
+  /// Vrai dès qu'au moins un appareil du correspondant a relevé le message.
+  /// Mutable : le passage de « envoyé » à « remis » se fait en place.
+  bool delivered;
+
   bool get hasAttachment => attachment != null;
 
   Map<String, Object?> toJson() => {
@@ -25,6 +36,8 @@ class ChatMessage {
         'm': mine,
         'a': at.millisecondsSinceEpoch,
         if (attachment != null) 'f': attachment!.toJson(),
+        if (pendingReceiptIds.isNotEmpty) 'r': pendingReceiptIds,
+        if (delivered) 'd': true,
       };
 
   static ChatMessage fromJson(Map<String, Object?> json) => ChatMessage(
@@ -34,6 +47,9 @@ class ChatMessage {
         attachment: json['f'] == null
             ? null
             : AttachmentRef.fromJson((json['f'] as Map).cast<String, Object?>()),
+        pendingReceiptIds:
+            ((json['r'] as List?) ?? const []).cast<String>(),
+        delivered: json['d'] as bool? ?? false,
       );
 }
 

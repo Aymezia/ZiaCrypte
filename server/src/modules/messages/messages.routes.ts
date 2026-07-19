@@ -69,6 +69,39 @@ export async function messagesRoutes(app: FastifyInstance) {
     }
   });
 
+  /**
+   * Statut de remise des messages que l'appareil courant a ENVOYÉS.
+   *
+   * Le serveur connaît déjà la date de remise : il la pose lui-même quand le
+   * destinataire relève sa boîte. L'exposer ici à l'expéditeur ne lui apprend
+   * donc rien de neuf — c'est le reçu de remise, le signal « ton message est
+   * arrivé sur un appareil du correspondant ».
+   *
+   * La requête est scopée à `senderDeviceId` : on ne renvoie le statut que des
+   * blobs que CET appareil a émis. Impossible de sonder la remise des messages
+   * d'autrui.
+   *
+   * Il n'y a délibérément PAS de reçu de lecture ici. Un « lu » passant par le
+   * serveur lui révélerait que le destinataire a ouvert le message — une
+   * métadonnée que le chiffrement de bout en bout ne protège pas. S'il est un
+   * jour ajouté, ce sera par un message chiffré, et sur option.
+   */
+  app.get('/messages/status', { preHandler: requireAuth }, async (request) => {
+    const { ids } = z.object({ ids: z.string() }).parse(request.query);
+    const list = ids.split(',').filter(Boolean).slice(0, 500);
+    if (list.length === 0) return { delivered: [] };
+
+    const rows = await prisma.messageBlob.findMany({
+      where: {
+        senderDeviceId: request.auth!.deviceId,
+        clientMessageId: { in: list },
+        deliveredAt: { not: null },
+      },
+      select: { clientMessageId: true },
+    });
+    return { delivered: rows.map((r) => r.clientMessageId) };
+  });
+
   // Récupère les blobs en attente pour l'appareil courant, puis les marque livrés.
   app.get('/messages', { preHandler: requireAuth }, async (request) => {
     const deviceId = request.auth!.deviceId;

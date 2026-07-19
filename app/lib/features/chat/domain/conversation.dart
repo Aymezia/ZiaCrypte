@@ -13,11 +13,13 @@ class Conversation {
     this.peerUserId,
     this.isGroup = false,
     Set<String>? memberUserIds,
+    Set<String>? ownDeviceIds,
     Set<String>? targetDeviceIds,
     Map<String, int>? sessions,
     List<ChatMessage>? messages,
     DateTime? lastActivity,
   })  : memberUserIds = memberUserIds ?? {},
+        ownDeviceIds = ownDeviceIds ?? {},
         targetDeviceIds = targetDeviceIds ?? {},
         sessions = sessions ?? {},
         messages = messages ?? [],
@@ -47,6 +49,10 @@ class Conversation {
   /// reste. Le serveur n'a besoin que de la composition, pour router.
   final Set<String> memberUserIds;
 
+  /// Appareils de cette conversation qui m'appartiennent (mes autres appareils).
+  /// Exclus du reçu de remise : leur relève ne prouve rien sur le destinataire.
+  final Set<String> ownDeviceIds;
+
   /// Appareils auxquels envoyer : ceux du correspondant, plus les autres
   /// appareils de l'utilisateur lui-même (pour qu'il retrouve ses propres
   /// messages partout).
@@ -71,6 +77,7 @@ class Conversation {
         if (peerUserId != null) 'peerId': peerUserId,
         if (isGroup) 'group': true,
         if (memberUserIds.isNotEmpty) 'members': memberUserIds.toList(),
+        if (ownDeviceIds.isNotEmpty) 'own': ownDeviceIds.toList(),
         'devices': targetDeviceIds.toList(),
         'at': lastActivity.millisecondsSinceEpoch,
       };
@@ -82,6 +89,8 @@ class Conversation {
         isGroup: json['group'] as bool? ?? false,
         memberUserIds:
             ((json['members'] as List?) ?? const []).cast<String>().toSet(),
+        ownDeviceIds:
+            ((json['own'] as List?) ?? const []).cast<String>().toSet(),
         targetDeviceIds: ((json['devices'] as List?) ?? const [])
             .cast<String>()
             .toSet(),

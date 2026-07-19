@@ -457,6 +457,9 @@ class ChatService extends ChangeNotifier {
       final device = bundleJson['deviceId'] as String;
       if (device == deviceId) continue; // cet appareil-ci
       conv.targetDeviceIds.add(device);
+      // Un appareil du correspondant compte pour le reçu de remise ; l'un des
+      // miens, non — sa relève ne dit rien de ce que le destinataire a reçu.
+      if (targetUserId == userId) conv.ownDeviceIds.add(device);
       if (conv.sessions.containsKey(device)) continue;
 
       final theirIdentity = base64Decode(bundleJson['identityKey'] as String);
@@ -597,6 +600,9 @@ class ChatService extends ChangeNotifier {
     try {
       final clearText = _encodePayload(text, attachment);
       var delivered = 0;
+      // Un identifiant de blob par appareil du correspondant : c'est ce qu'on
+      // interrogera pour savoir si le message a été remis.
+      final receiptIds = <String>[];
 
       // Chaque appareil a sa propre session : le message est chiffré autant de
       // fois qu'il y a de destinataires. Le serveur ne voit que des blobs.
@@ -606,13 +612,15 @@ class ChatService extends ChangeNotifier {
         try {
           final enc = await gateway.encrypt(sessionId, clearText);
           final handshake = _pendingHandshakes['${conv.id}-$device'];
+          final clientMessageId = _uuidV4();
           await api.sendMessage(
             conversationId: conv.id,
             recipientDeviceId: device,
-            clientMessageId: _uuidV4(),
+            clientMessageId: clientMessageId,
             headerB64: base64Encode(Envelope.packHeader(enc.header, handshake)),
             ciphertextB64: base64Encode(enc.ciphertext),
           );
+          if (!conv.ownDeviceIds.contains(device)) receiptIds.add(clientMessageId);
           _pendingHandshakes.remove('${conv.id}-$device');
           delivered++;
         } catch (e) {
@@ -635,6 +643,7 @@ class ChatService extends ChangeNotifier {
           mine: true,
           at: DateTime.now(),
           attachment: attachment,
+          pendingReceiptIds: receiptIds,
         ));
       }
       conv.lastActivity = DateTime.now();
@@ -643,6 +652,10 @@ class ChatService extends ChangeNotifier {
       await _saveHistory(conv);
       await _saveSessions(conv); // les ratchets ont avancé
       await _saveConversations();
+
+      // Vérifie tout de suite : si le correspondant est en ligne, le passage à
+      // « remis » ne doit pas attendre le prochain tour du relevé périodique.
+      unawaited(_checkDeliveries());
     } catch (e) {
       error = _humanize(e);
       notifyListeners();
@@ -750,11 +763,59 @@ class ChatService extends ChangeNotifier {
 
   // --------------------------------------------------------------- réception
 
+  /// Passe en « remis » les messages envoyés qu'au moins un appareil du
+  /// correspondant a relevés.
+  ///
+  /// Ne demande au serveur que ce qu'il sait déjà (la date de remise qu'il pose
+  /// lui-même) : aucun reçu de lecture, aucune métadonnée nouvelle exposée.
+  Future<void> _checkDeliveries() async {
+    final api = _api;
+    if (api == null) return;
+
+    // Rassemble les identifiants encore à confirmer, tous fils confondus.
+    final aConfirmer = <String>[];
+    for (final conv in _conversations.values) {
+      for (final m in conv.messages) {
+        if (m.mine && !m.delivered && m.pendingReceiptIds.isNotEmpty) {
+          aConfirmer.addAll(m.pendingReceiptIds);
+        }
+      }
+    }
+    if (aConfirmer.isEmpty) return;
+
+    Set<String> remis;
+    try {
+      remis = (await api.deliveredAmong(aConfirmer)).toSet();
+    } catch (_) {
+      return; // une vérification ratée n'a aucune conséquence : on réessaiera
+    }
+    if (remis.isEmpty) return;
+
+    var changed = false;
+    for (final conv in _conversations.values) {
+      var convChanged = false;
+      for (final m in conv.messages) {
+        if (m.mine && !m.delivered && m.pendingReceiptIds.any(remis.contains)) {
+          m.delivered = true; // au moins un appareil du correspondant l'a relevé
+          convChanged = true;
+        }
+      }
+      if (convChanged) {
+        changed = true;
+        await _saveHistory(conv);
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
   void _startPolling() {
     _poll?.cancel();
     // Le WebSocket supprime la latence ; le relevé périodique reste un filet de
     // sécurité — la remise ne doit jamais dépendre du seul temps réel.
-    _poll = Timer.periodic(const Duration(seconds: 15), (_) => _pollOnce());
+    _poll = Timer.periodic(const Duration(seconds: 15), (_) {
+      _pollOnce();
+      _checkDeliveries();
+    });
     _connectRealtime();
   }
 
