@@ -5,13 +5,15 @@ import 'package:dio/dio.dart';
 /// Ne transporte que des données déjà chiffrées par le moteur natif : ce client
 /// ne fait aucune cryptographie, il sérialise et route.
 class ApiClient {
-  ApiClient(String baseUrl)
+  ApiClient(this.baseUrl)
       : _dio = Dio(BaseOptions(
           baseUrl: baseUrl,
           connectTimeout: const Duration(seconds: 10),
           receiveTimeout: const Duration(seconds: 15),
         ));
 
+  /// Racine de l'API, réutilisée pour construire l'URL du WebSocket.
+  final String baseUrl;
   final Dio _dio;
   String? _accessToken;
 

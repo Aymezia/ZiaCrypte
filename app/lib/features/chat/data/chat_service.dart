@@ -38,6 +38,8 @@ class ChatService extends ChangeNotifier {
   ApiClient? _api;
   FfiCryptoGateway? _gateway;
   Timer? _poll;
+  WebSocket? _socket;
+  bool realtime = false;
 
   String? username;
   String? userId;
@@ -324,7 +326,56 @@ class ChatService extends ChangeNotifier {
 
   void _startPolling() {
     _poll?.cancel();
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) => _pollOnce());
+    // Le WebSocket supprime la latence ; le relevé périodique reste en filet de
+    // sécurité (connexion coupée, notification perdue) — la remise ne doit
+    // jamais dépendre uniquement du temps réel.
+    _poll = Timer.periodic(const Duration(seconds: 15), (_) => _pollOnce());
+    _connectRealtime();
+  }
+
+  /// Ouvre la liaison temps réel : le serveur signale l'arrivée d'un blob, le
+  /// client relève alors sa boîte immédiatement.
+  Future<void> _connectRealtime() async {
+    final api = _api;
+    if (api == null || api.accessToken == null) return;
+    try {
+      final base = Uri.parse(api.baseUrl);
+      final wsUri = base.replace(
+        scheme: base.scheme == 'https' ? 'wss' : 'ws',
+        path: '/ws',
+        queryParameters: {'token': api.accessToken!},
+      );
+      final socket = await WebSocket.connect(wsUri.toString());
+      _socket = socket;
+      realtime = true;
+      notifyListeners();
+
+      socket.listen(
+        (event) {
+          // Toute notification déclenche un relevé ; le contenu reste chiffré
+          // et n'est jamais transporté par le WebSocket.
+          if (event is String && event.contains('message.pending')) _pollOnce();
+        },
+        onDone: _onRealtimeLost,
+        onError: (_) => _onRealtimeLost(),
+        cancelOnError: true,
+      );
+      await _pollOnce(); // rattrape ce qui est arrivé avant la connexion
+    } catch (_) {
+      realtime = false; // le polling prend le relais
+      notifyListeners();
+    }
+  }
+
+  void _onRealtimeLost() {
+    _socket = null;
+    realtime = false;
+    notifyListeners();
+    // Tentative de reconnexion : sans elle on retomberait silencieusement sur
+    // un simple relevé toutes les 15 s.
+    Future<void>.delayed(const Duration(seconds: 3), () {
+      if (_api != null && _socket == null) _connectRealtime();
+    });
   }
 
   Future<void> _pollOnce() async {
@@ -381,6 +432,7 @@ class ChatService extends ChangeNotifier {
   @override
   void dispose() {
     _poll?.cancel();
+    _socket?.close();
     _gateway?.dispose();
     super.dispose();
   }

@@ -7,11 +7,23 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import '../../app/lib/features/chat/data/envelope.dart';
 import '../../app/lib/features/chat/data/ffi_crypto_gateway.dart';
+
+String _uuidV4() {
+  final r = Random.secure();
+  final b = List<int>.generate(16, (_) => r.nextInt(256));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  String h(int i) => b[i].toRadixString(16).padLeft(2, '0');
+  return '${h(0)}${h(1)}${h(2)}${h(3)}-${h(4)}${h(5)}-${h(6)}${h(7)}-'
+      '${h(8)}${h(9)}-${h(10)}${h(11)}${h(12)}${h(13)}${h(14)}${h(15)}';
+}
 
 Future<void> main(List<String> args) async {
   final baseUrl = args.isNotEmpty ? args[0] : 'http://127.0.0.1:3210';
@@ -70,6 +82,26 @@ Future<void> main(List<String> args) async {
         base64Decode(m['ciphertext'] as String),
       );
       stdout.writeln('RECU_DECHIFFRE: ${utf8.decode(plain)}');
+
+      // Répond immédiatement : permet de mesurer la latence de bout en bout
+      // côté application (WebSocket vs relevé périodique).
+      final reply = 'echo: ${utf8.decode(plain)}';
+      final enc = await gateway.encrypt(sessionId, Uint8List.fromList(utf8.encode(reply)));
+      await http.post(
+        Uri.parse('$baseUrl/v1/messages'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'conversationId': m['conversationId'],
+          'recipientDeviceId': m['senderDeviceId'],
+          'clientMessageId': _uuidV4(),
+          'header': base64Encode(Envelope.packHeader(enc.header, null)),
+          'ciphertext': base64Encode(enc.ciphertext),
+        }),
+      );
+      stdout.writeln('REPONSE_ENVOYEE: $reply');
     }
     await Future<void>.delayed(const Duration(milliseconds: 800));
   }

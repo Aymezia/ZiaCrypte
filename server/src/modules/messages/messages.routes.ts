@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
 import { requireAuth } from '../../plugins/auth.js';
+import { gateway } from '../../ws/gateway.js';
 
 const b64 = (buf: Uint8Array) => Buffer.from(buf).toString('base64');
 const fromB64 = (s: string) => {
@@ -52,6 +53,9 @@ export async function messagesRoutes(app: FastifyInstance) {
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
       });
+      // Réveille le destinataire s'il est connecté ; sinon il relèvera sa
+      // boîte à sa prochaine connexion (la remise ne dépend pas du WebSocket).
+      gateway?.notifyPending(body.recipientDeviceId);
       return reply.code(201).send({ id: blob.id });
     } catch (e) {
       // Idempotence anti-rejeu : (recipientDeviceId, clientMessageId) est unique.
