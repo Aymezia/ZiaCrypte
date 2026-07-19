@@ -6,6 +6,7 @@ import { authRoutes } from './modules/auth/auth.routes.js';
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js';
 import { devicesRoutes } from './modules/devices/devices.routes.js';
 import { messagesRoutes } from './modules/messages/messages.routes.js';
+import { pushRoutes } from './modules/push/push.routes.js';
 import { usersRoutes } from './modules/users/users.routes.js';
 
 export function buildApp(): FastifyInstance {
@@ -32,6 +33,7 @@ export function buildApp(): FastifyInstance {
       await messagesRoutes(v1);
       await usersRoutes(v1);
       await attachmentsRoutes(v1);
+      await pushRoutes(v1);
     },
     { prefix: '/v1' },
   );

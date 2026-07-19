@@ -132,10 +132,13 @@ model DeviceSignature {
 model Conversation {
   id        String           @id @default(uuid()) @db.Uuid
   type      ConversationType
-  createdBy String           @map("created_by") @db.Uuid
+  // Nullable : quand le créateur supprime son compte, la conversation doit
+  // survivre pour les autres participants — leur historique ne lui appartient
+  // pas. Le champ passe à NULL au lieu de bloquer la suppression.
+  createdBy String?          @map("created_by") @db.Uuid
   createdAt DateTime         @default(now()) @map("created_at")
 
-  creator      User                      @relation("ConversationCreator", fields: [createdBy], references: [id])
+  creator      User?                     @relation("ConversationCreator", fields: [createdBy], references: [id], onDelete: SetNull)
   participants ConversationParticipant[]
   messageBlobs MessageBlob[]
   attachments  AttachmentRef[]
@@ -170,8 +173,12 @@ model MessageBlob {
   expiresAt         DateTime  @map("expires_at")
 
   conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender       Device          @relation("SentBlobs", fields: [senderDeviceId], references: [id])
-  recipient    Device          @relation("ReceivedBlobs", fields: [recipientDeviceId], references: [id])
+  // Cascade des deux côtés : un blob non remis à un appareil supprimé est
+  // indéchiffrable de toute façon (ses clés privées ont disparu avec lui). Le
+  // conserver bloquerait la suppression de compte et garderait du chiffré sans
+  // titulaire — l'inverse de la minimisation des données.
+  sender       Device          @relation("SentBlobs", fields: [senderDeviceId], references: [id], onDelete: Cascade)
+  recipient    Device          @relation("ReceivedBlobs", fields: [recipientDeviceId], references: [id], onDelete: Cascade)
   receipts     MessageReceipt[]
 
   @@unique([recipientDeviceId, clientMessageId])

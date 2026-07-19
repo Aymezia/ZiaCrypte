@@ -59,14 +59,24 @@ export class RealtimeGateway {
     if (sockets.size === 0) this.byDevice.delete(deviceId);
   }
 
-  /** Prévient un appareil qu'un blob l'attend. Sans effet s'il est hors ligne. */
-  notifyPending(deviceId: string) {
+  /**
+   * Prévient un appareil qu'un blob l'attend.
+   *
+   * Renvoie `true` si au moins une socket ouverte a reçu le signal. L'appelant
+   * s'en sert pour décider d'un repli en notification push : une socket
+   * présente mais en cours de fermeture ne compte pas comme jointe.
+   */
+  notifyPending(deviceId: string): boolean {
     const sockets = this.byDevice.get(deviceId);
-    if (!sockets) return;
+    if (!sockets) return false;
     const payload = JSON.stringify({ type: 'message.pending' });
+    let delivered = false;
     for (const socket of sockets) {
-      if (socket.readyState === WebSocket.OPEN) socket.send(payload);
+      if (socket.readyState !== WebSocket.OPEN) continue;
+      socket.send(payload);
+      delivered = true;
     }
+    return delivered;
   }
 
   get connectedDevices() {

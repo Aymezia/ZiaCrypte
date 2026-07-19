@@ -5,6 +5,7 @@ import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
 import { requireAuth } from '../../plugins/auth.js';
 import { gateway } from '../../ws/gateway.js';
+import { pushService } from '../push/push.service.js';
 
 const b64 = (buf: Uint8Array) => Buffer.from(buf).toString('base64');
 const fromB64 = (s: string) => {
@@ -53,9 +54,15 @@ export async function messagesRoutes(app: FastifyInstance) {
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
       });
-      // Réveille le destinataire s'il est connecté ; sinon il relèvera sa
-      // boîte à sa prochaine connexion (la remise ne dépend pas du WebSocket).
-      gateway?.notifyPending(body.recipientDeviceId);
+      // Réveille le destinataire s'il est connecté ; sinon on tente un push
+      // sans contenu. Dans tous les cas la remise ne dépend d'aucun des deux :
+      // le blob est persisté et sera relevé à la prochaine connexion.
+      //
+      // Pas d'`await` : un fournisseur push lent ne doit pas retarder la
+      // réponse à l'expéditeur, et l'échec est déjà avalé par wakeDevice.
+      if (!gateway?.notifyPending(body.recipientDeviceId)) {
+        void pushService?.wakeDevice(body.recipientDeviceId);
+      }
       return reply.code(201).send({ id: blob.id });
     } catch (e) {
       // Idempotence anti-rejeu : (recipientDeviceId, clientMessageId) est unique.

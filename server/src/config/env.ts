@@ -24,6 +24,11 @@ const schema = z.object({
   S3_BUCKET: z.string().default('ziacrypte-attachments'),
   S3_ACCESS_KEY: z.string().min(3),
   S3_SECRET_KEY: z.string().min(8),
+
+  // Notifications push. Optionnel : sans compte de service Firebase, le serveur
+  // démarre avec un fournisseur inerte et le signale au démarrage. La remise
+  // des messages n'en dépend pas — seule la latence hors ligne se dégrade.
+  FCM_SERVICE_ACCOUNT_FILE: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);
