@@ -5,6 +5,12 @@ name: build-apps
 # la main, et automatiquement à la publication d'une release — les artefacts y
 # sont alors attachés.
 
+# Le jeton par défaut est en lecture seule sur les releases : sans cette
+# permission, les étapes « Attach to release » échouent en HTTP 403 alors que
+# les binaires ont été construits correctement, et la release part incomplète.
+permissions:
+  contents: write
+
 env:
   ZIA_SERVER_URL: https://51.83.199.103.nip.io
 
