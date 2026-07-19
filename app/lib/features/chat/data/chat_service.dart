@@ -18,6 +18,18 @@ class ChatMessage {
   final String text;
   final bool mine;
   final DateTime at;
+
+  Map<String, Object?> toJson() => {
+        't': text,
+        'm': mine,
+        'a': at.millisecondsSinceEpoch,
+      };
+
+  static ChatMessage fromJson(Map<String, Object?> json) => ChatMessage(
+        text: json['t'] as String,
+        mine: json['m'] as bool,
+        at: DateTime.fromMillisecondsSinceEpoch(json['a'] as int),
+      );
 }
 
 /// Orchestration de l'application : relie le moteur cryptographique natif au
@@ -181,6 +193,45 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  // ---- Historique local, chiffré par le moteur ----
+
+  /// Nom de l'entrée du coffre pour une conversation donnée. Les caractères
+  /// hors [A-Za-z0-9._-] sont refusés par le moteur : on les remplace.
+  String _historyKey(String conversation) =>
+      'hist-${conversation.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}';
+
+  Future<void> _loadHistory(String conversation) async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    try {
+      final raw = await gateway.vaultRead(_historyKey(conversation));
+      messages.clear();
+      if (raw != null && raw.isNotEmpty) {
+        final list = jsonDecode(utf8.decode(raw)) as List;
+        messages.addAll(list
+            .cast<Map<String, dynamic>>()
+            .map((m) => ChatMessage.fromJson(m)));
+      }
+      notifyListeners();
+    } catch (_) {
+      // Un historique illisible ne doit pas empêcher de discuter.
+      messages.clear();
+    }
+  }
+
+  Future<void> _saveHistory() async {
+    final gateway = _gateway;
+    final conversation = conversationId;
+    if (gateway == null || conversation == null) return;
+    try {
+      final data = utf8.encode(jsonEncode(messages.map((m) => m.toJson()).toList()));
+      await gateway.vaultWrite(_historyKey(conversation), Uint8List.fromList(data));
+    } catch (e) {
+      error = 'Historique non enregistré : ${_humanize(e)}';
+      notifyListeners();
+    }
+  }
+
   /// Oublie le compte local et revient à l'écran d'accueil.
   void forgetAccount() {
     AppStorage.clearAccount();
@@ -239,6 +290,7 @@ class ChatService extends ChangeNotifier {
       peerUserId = pid;
       peerDeviceId = bundleJson['deviceId'] as String;
       conversationId = convId;
+      await _loadHistory(convId);
       _setBusy(false);
     } catch (e) {
       _setBusy(false, err: _humanize(e));
@@ -263,6 +315,7 @@ class ChatService extends ChangeNotifier {
       _pendingHandshake = null; // joint une seule fois
       messages.add(ChatMessage(text: text, mine: true, at: DateTime.now()));
       notifyListeners();
+      await _saveHistory();
     } catch (e) {
       error = _humanize(e);
       notifyListeners();
@@ -288,6 +341,8 @@ class ChatService extends ChangeNotifier {
           _sessionId = await gateway.acceptSession(unpacked.handshake!);
           conversationId = m['conversationId'] as String;
           peerDeviceId = m['senderDeviceId'] as String;
+          peerUsername = m['senderUsername'] as String?;
+          await _loadHistory(conversationId!);
         }
         if (_sessionId == null) continue;
 
@@ -302,7 +357,10 @@ class ChatService extends ChangeNotifier {
           at: DateTime.now(),
         ));
       }
-      if (incoming.isNotEmpty) notifyListeners();
+      if (incoming.isNotEmpty) {
+        notifyListeners();
+        await _saveHistory();
+      }
     } catch (e) {
       error = _humanize(e);
       notifyListeners();

@@ -101,6 +101,17 @@ ZIA_API ZiaStatus zia_session_decrypt(ZiaSession* session,
                                       const uint8_t* ciphertext, size_t ciphertext_len,
                                       uint8_t** out_plaintext, size_t* out_plaintext_len);
 
+/* ================= Coffre local chiffré ================= */
+/* Range des données arbitraires chiffrées sous la clé maîtresse de l'appareil.
+ * Destiné à ce qui est sensible sans être du matériel cryptographique —
+ * l'historique des conversations en particulier, qui ne doit pas se retrouver
+ * en clair sur le disque. `name` n'accepte que [A-Za-z0-9._-]. */
+ZIA_API ZiaStatus zia_secure_write(ZiaEngine* engine, const char* name,
+                                   const uint8_t* data, size_t len);
+ZIA_API ZiaStatus zia_secure_read(ZiaEngine* engine, const char* name,
+                                  uint8_t** out, size_t* out_len);
+ZIA_API ZiaStatus zia_secure_erase(ZiaEngine* engine, const char* name);
+
 /* ================= Persistance de session ================= */
 ZIA_API ZiaStatus zia_session_serialize(ZiaSession* session, uint8_t** out, size_t* out_len);
 ZIA_API ZiaStatus zia_session_deserialize(ZiaEngine* engine, const uint8_t* data, size_t len,

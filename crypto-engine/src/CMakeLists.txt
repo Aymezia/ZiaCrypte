@@ -6,6 +6,8 @@ add_library(zia_crypto SHARED
     session.cpp
     primitives/primitives.cpp
     storage/identity_store.cpp
+    storage/secure_blob.cpp
+    vault.cpp
 )
 
 target_include_directories(zia_crypto

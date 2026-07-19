@@ -164,6 +164,15 @@ class ZiaBindings {
                 Pointer<Pointer<ZiaSession>>),
             int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
                 Pointer<Pointer<ZiaSession>>)>('zia_session_deserialize'),
+        secureWrite = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, Size),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>,
+                int)>('zia_secure_write'),
+        secureRead = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_secure_read'),
         sessionClosePtr = lib.lookup<NativeFinalizerFunction>('zia_session_close'),
         sessionClose = lib.lookupFunction<Void Function(Pointer<ZiaSession>),
             void Function(Pointer<ZiaSession>)>('zia_session_close');
@@ -196,6 +205,11 @@ class ZiaBindings {
       sessionSerialize;
   final int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
       Pointer<Pointer<ZiaSession>>) sessionDeserialize;
+
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int)
+      secureWrite;
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Pointer<Uint8>>,
+      Pointer<Size>) secureRead;
 
   /// Pointeur natif de `zia_session_close`, pour l'enregistrer auprès d'un
   /// [NativeFinalizer] (libération native même si `close()` est oublié côté Dart).

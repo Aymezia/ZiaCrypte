@@ -40,7 +40,7 @@ SODIUM="$WORK/sodium"
 ENGINE_SRC=(
   "$ROOT/src/engine.cpp" "$ROOT/src/identity.cpp" "$ROOT/src/x3dh.cpp"
   "$ROOT/src/ratchet.cpp" "$ROOT/src/session.cpp" "$ROOT/src/primitives/primitives.cpp"
-  "$ROOT/src/storage/identity_store.cpp"
+  "$ROOT/src/storage/identity_store.cpp" "$ROOT/src/storage/secure_blob.cpp" "$ROOT/src/vault.cpp"
   "$ROOT/platform/windows/secure_key_store_windows.cpp"
 )
 COMMON_FLAGS=(-std=c++20 -O2 -DSODIUM_STATIC=1 -I"$ROOT/include" -I"$ROOT/src" -I"$SODIUM/include")

@@ -31,6 +31,7 @@ g++ -std=c++20 -O2 -DNDEBUG -fPIC -shared \
   "$ENGINE/src/ratchet.cpp" "$ENGINE/src/session.cpp" \
   "$ENGINE/src/primitives/primitives.cpp" \
   "$ENGINE/src/storage/identity_store.cpp" \
+  "$ENGINE/src/storage/secure_blob.cpp" "$ENGINE/src/vault.cpp" \
   "$ENGINE/platform/linux/secure_key_store_linux.cpp" \
   -o "$TMP_SO" \
   -Wl,--exclude-libs,ALL "$SODIUM_A" $(pkg-config --libs libsecret-1)

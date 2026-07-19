@@ -275,6 +275,39 @@ class NativeCryptoEngine {
     }
   }
 
+  // ---- Coffre local chiffré ----
+
+  /// Range [data] chiffré sous la clé maîtresse de l'appareil.
+  void vaultWrite(String name, Uint8List data) {
+    final namePtr = name.toNativeUtf8();
+    final buf = _toNative(data);
+    try {
+      _check(_b.secureWrite(_engine, namePtr.cast<Char>(), buf, data.length));
+    } finally {
+      malloc.free(namePtr);
+      calloc.free(buf);
+    }
+  }
+
+  /// Relit une entrée du coffre, ou `null` si elle n'existe pas.
+  Uint8List? vaultRead(String name) {
+    final namePtr = name.toNativeUtf8();
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      final status = _b.secureRead(_engine, namePtr.cast<Char>(), outPtr, outLen);
+      if (status == ZiaStatus.errSessionNotFound) return null; // jamais écrit
+      if (status != ZiaStatus.ok) {
+        throw ZiaCryptoException.fromStatus(status, _lastError());
+      }
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      malloc.free(namePtr);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
   void closeSession(NativeSession session) => session.close(_b.sessionClose);
 
   void dispose() => _b.engineShutdown(_engine);

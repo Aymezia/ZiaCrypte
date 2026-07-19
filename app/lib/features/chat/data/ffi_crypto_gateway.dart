@@ -60,6 +60,12 @@ class FfiCryptoGateway implements CryptoGateway {
           int sessionId, Uint8List header, Uint8List ciphertext) =>
       _engine.decrypt(sessionId, header, ciphertext);
 
+  /// Coffre local chiffré (historique des conversations, etc.).
+  Future<void> vaultWrite(String name, Uint8List data) =>
+      _engine.vaultWrite(name, data);
+
+  Future<Uint8List?> vaultRead(String name) => _engine.vaultRead(name);
+
   @override
   Future<Uint8List> exportSession(int sessionId) =>
       _engine.serializeSession(sessionId);

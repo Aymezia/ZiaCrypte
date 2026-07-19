@@ -69,6 +69,9 @@ export async function messagesRoutes(app: FastifyInstance) {
       where: { recipientDeviceId: deviceId, deliveredAt: null },
       orderBy: { createdAt: 'asc' },
       take: 200,
+      // Le pseudo de l'expéditeur permet au destinataire d'afficher qui lui
+      // écrit, y compris pour une conversation qu'il n'a pas initiée.
+      include: { sender: { include: { user: true } } },
     });
 
     if (pending.length > 0) {
@@ -82,6 +85,7 @@ export async function messagesRoutes(app: FastifyInstance) {
       id: m.id,
       conversationId: m.conversationId,
       senderDeviceId: m.senderDeviceId,
+      senderUsername: m.sender.user.username,
       clientMessageId: m.clientMessageId,
       header: b64(m.ratchetHeader),
       ciphertext: b64(m.ciphertext),

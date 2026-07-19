@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -86,6 +87,52 @@ int main() {
                                 ZIA_PUBLIC_KEY_LEN,
                                 bundle.signed_prekey_signature) == ZIA_OK);
     ok("Signature du signed prekey toujours valide après rechargement");
+
+    zia_engine_shutdown(engine);
+  }
+
+  // --- Coffre local : ce qu'on y range survit et reste chiffré ---
+  {
+    ZiaEngine* engine = open_engine(dir);
+    const char* payload = "historique de conversation, en clair uniquement en memoire";
+    const size_t payload_len = std::strlen(payload);
+
+    assert(zia_secure_write(engine, "historique-alice",
+                            reinterpret_cast<const uint8_t*>(payload),
+                            payload_len) == ZIA_OK);
+
+    // Une entrée inexistante se signale proprement, sans erreur fatale.
+    uint8_t* absent = nullptr;
+    size_t absent_len = 0;
+    assert(zia_secure_read(engine, "jamais-ecrit", &absent, &absent_len) ==
+           ZIA_ERR_SESSION_NOT_FOUND);
+
+    // Un nom malveillant ne doit pas pouvoir sortir du coffre.
+    assert(zia_secure_write(engine, "../../evasion",
+                            reinterpret_cast<const uint8_t*>(payload), payload_len) ==
+           ZIA_ERR_STORAGE_IO);
+    ok("Coffre local : nom de fichier malveillant refusé");
+
+    zia_engine_shutdown(engine);
+
+    // Relecture après redémarrage du moteur.
+    engine = open_engine(dir);
+    uint8_t* read_back = nullptr;
+    size_t read_len = 0;
+    assert(zia_secure_read(engine, "historique-alice", &read_back, &read_len) == ZIA_OK);
+    assert(read_len == payload_len);
+    assert(std::memcmp(read_back, payload, payload_len) == 0);
+    zia_free_buffer(read_back, read_len);
+    ok("Coffre local : contenu retrouvé intact après redémarrage");
+
+    // Le fichier sur disque ne doit pas contenir le texte en clair.
+    const auto blob = std::filesystem::path(dir) / "vault" / "historique-alice.zia";
+    assert(std::filesystem::exists(blob));
+    std::ifstream f(blob, std::ios::binary);
+    const std::string raw((std::istreambuf_iterator<char>(f)),
+                          std::istreambuf_iterator<char>());
+    assert(raw.find("historique de conversation") == std::string::npos);
+    ok("Coffre local : rien en clair sur le disque");
 
     zia_engine_shutdown(engine);
   }

@@ -20,6 +20,23 @@ export async function conversationsRoutes(app: FastifyInstance) {
     const count = await prisma.user.count({ where: { id: { in: participantIds } } });
     if (count !== participantIds.length) throw new HttpError(400, 'participant inconnu');
 
+    // Une conversation directe entre deux personnes est unique : on renvoie
+    // l'existante plutôt que d'en créer une nouvelle à chaque ouverture. Sans
+    // cela son identifiant changerait à chaque fois, et l'historique local
+    // rattaché à cet identifiant serait perdu.
+    if (body.type === 'direct' && participantIds.length === 2) {
+      const existing = await prisma.conversation.findFirst({
+        where: {
+          type: 'direct',
+          participants: { every: { userId: { in: participantIds } } },
+        },
+        include: { participants: true },
+      });
+      if (existing && existing.participants.length === 2) {
+        return reply.code(200).send({ id: existing.id, type: existing.type });
+      }
+    }
+
     const conversation = await prisma.conversation.create({
       data: {
         type: body.type,

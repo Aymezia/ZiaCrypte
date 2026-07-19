@@ -83,6 +83,8 @@ model Device {
   signaturesReceived DeviceSignature[] @relation("Signed")
   pushTokens         PushToken[]
   authSessions       AuthSession[]
+  sentBlobs          MessageBlob[]     @relation("SentBlobs")
+  receivedBlobs      MessageBlob[]     @relation("ReceivedBlobs")
 
   @@map("devices")
 }
@@ -168,6 +170,8 @@ model MessageBlob {
   expiresAt         DateTime  @map("expires_at")
 
   conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       Device          @relation("SentBlobs", fields: [senderDeviceId], references: [id])
+  recipient    Device          @relation("ReceivedBlobs", fields: [recipientDeviceId], references: [id])
   receipts     MessageReceipt[]
 
   @@unique([recipientDeviceId, clientMessageId])

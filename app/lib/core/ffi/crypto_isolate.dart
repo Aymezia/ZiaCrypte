@@ -70,6 +70,14 @@ class ZiaCryptoEngine {
           int sessionId, Uint8List header, Uint8List ciphertext) =>
       _call('decrypt', {'session': sessionId, 'header': header, 'ct': ciphertext});
 
+  /// Range une donnée chiffrée dans le coffre local de l'appareil.
+  Future<void> vaultWrite(String name, Uint8List data) =>
+      _call('vaultWrite', {'name': name, 'data': data});
+
+  /// Relit une entrée du coffre local (null si absente).
+  Future<Uint8List?> vaultRead(String name) =>
+      _call('vaultRead', {'name': name});
+
   Future<Uint8List> serializeSession(int sessionId) =>
       _call('serializeSession', {'session': sessionId});
   Future<int> deserializeSession(Uint8List data) =>
@@ -178,6 +186,11 @@ class ZiaCryptoEngine {
       case 'decrypt':
         return engine.decrypt(sessions[a['session'] as int]!,
             a['header'] as Uint8List, a['ct'] as Uint8List);
+      case 'vaultWrite':
+        engine.vaultWrite(a['name'] as String, a['data'] as Uint8List);
+        return null;
+      case 'vaultRead':
+        return engine.vaultRead(a['name'] as String);
       case 'serializeSession':
         return engine.serializeSession(sessions[a['session'] as int]!);
       case 'deserializeSession':
