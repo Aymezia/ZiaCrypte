@@ -5,6 +5,7 @@ import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
 import { requireAuth } from '../../plugins/auth.js';
 import { gateway } from '../../ws/gateway.js';
+import { requireMembership } from '../conversations/membership.js';
 import { pushService } from '../push/push.service.js';
 
 const b64 = (buf: Uint8Array) => Buffer.from(buf).toString('base64');
@@ -30,12 +31,7 @@ export async function messagesRoutes(app: FastifyInstance) {
     const body = sendSchema.parse(request.body);
     const me = request.auth!;
 
-    const participant = await prisma.conversationParticipant.findUnique({
-      where: {
-        conversationId_userId: { conversationId: body.conversationId, userId: me.userId },
-      },
-    });
-    if (!participant) throw new HttpError(403, 'non membre de la conversation');
+    await requireMembership(body.conversationId, me.userId);
 
     const recipient = await prisma.device.findUnique({ where: { id: body.recipientDeviceId } });
     if (!recipient || !recipient.isActive) {

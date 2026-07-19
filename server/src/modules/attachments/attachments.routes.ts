@@ -7,6 +7,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { requireMembership } from '../conversations/membership.js';
 import { s3 } from '../../lib/storage.js';
 import { env } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
@@ -41,15 +42,7 @@ export async function attachmentsRoutes(app: FastifyInstance) {
     const body = createSchema.parse(request.body);
     const me = request.auth!;
 
-    const participant = await prisma.conversationParticipant.findUnique({
-      where: {
-        conversationId_userId: {
-          conversationId: body.conversationId,
-          userId: me.userId,
-        },
-      },
-    });
-    if (!participant) throw new HttpError(403, 'non membre de la conversation');
+    await requireMembership(body.conversationId, me.userId);
 
     const storageKey = `${body.conversationId}/${randomUUID()}`;
     const metadata = Buffer.from(body.encryptedMetadata, 'base64');
@@ -85,15 +78,7 @@ export async function attachmentsRoutes(app: FastifyInstance) {
     const attachment = await prisma.attachmentRef.findUnique({ where: { id } });
     if (!attachment) throw new HttpError(404, 'pièce jointe introuvable');
 
-    const participant = await prisma.conversationParticipant.findUnique({
-      where: {
-        conversationId_userId: {
-          conversationId: attachment.conversationId,
-          userId: request.auth!.userId,
-        },
-      },
-    });
-    if (!participant) throw new HttpError(403, 'non membre de la conversation');
+    await requireMembership(attachment.conversationId, request.auth!.userId);
 
     const downloadUrl = await getSignedUrl(
       s3,
