@@ -25,8 +25,29 @@ class AppStorage {
     return Directory('$base/ZiaCrypte');
   }
 
-  /// Dossier confié au moteur natif (il y écrit son identité chiffrée).
-  static String get engineStoragePath => dataDirectory.path;
+  /// Dossier confié au moteur natif pour un compte donné.
+  ///
+  /// **Un dossier par compte.** L'identité de l'appareil (la paire Ed25519) vit
+  /// dans ce dossier ; la partager entre deux comptes leur ferait publier la
+  /// MÊME clé publique, ce qui permettrait au serveur de prouver qu'ils
+  /// appartiennent à la même personne — exactement ce qu'on cherche à éviter en
+  /// permettant des comptes séparés. Le handshake X3DH entre ces deux comptes
+  /// serait de surcroît dégénéré (un DH d'une clé avec elle-même).
+  ///
+  /// [storageKey] est un identifiant local tiré au hasard à la création du
+  /// compte, sans lien avec le pseudo ni l'identifiant serveur : le nom du
+  /// dossier ne doit rien révéler à qui inspecte le disque.
+  static String engineStoragePathFor(String storageKey) =>
+      '${dataDirectory.path}${Platform.pathSeparator}accounts'
+      '${Platform.pathSeparator}$storageKey';
+
+  /// Emplacement historique, à la racine du dossier de données.
+  ///
+  /// Les comptes créés avant l'introduction des dossiers par compte y ont leur
+  /// identité. On continue de les servir depuis là plutôt que de déplacer des
+  /// fichiers : perdre `identity.zia` rendrait le compte définitivement
+  /// inutilisable, sa clé privée étant irremplaçable.
+  static String get legacyEngineStoragePath => dataDirectory.path;
 
   static File get _accountFile => File('${dataDirectory.path}/account.json');
 
@@ -40,6 +61,9 @@ class AppStorage {
         username: json['username'] as String,
         userId: json['userId'] as String,
         deviceId: json['deviceId'] as String,
+        // Absent des comptes antérieurs aux dossiers par compte : ils gardent
+        // l'emplacement historique.
+        storageKey: json['storageKey'] as String?,
       );
     } catch (_) {
       return null; // fichier absent ou illisible : on repart d'un compte neuf
@@ -53,10 +77,15 @@ class AppStorage {
       'username': account.username,
       'userId': account.userId,
       'deviceId': account.deviceId,
+      if (account.storageKey != null) 'storageKey': account.storageKey,
     }));
   }
 
-  /// Oublie le compte local (l'identité du moteur reste, elle, sur disque).
+  /// Oublie le compte local.
+  ///
+  /// L'identité du moteur reste sur disque, dans le dossier de ce compte : on
+  /// ne la détruit pas, l'utilisateur pouvant vouloir y revenir. Un compte créé
+  /// ensuite recevra son propre dossier, donc sa propre identité.
   static void clearAccount() {
     final file = _accountFile;
     if (file.existsSync()) file.deleteSync();
@@ -68,9 +97,18 @@ class SavedAccount {
     required this.username,
     required this.userId,
     required this.deviceId,
+    this.storageKey,
   });
 
   final String username;
   final String userId;
   final String deviceId;
+
+  /// Dossier moteur de ce compte. `null` pour les comptes antérieurs, qui
+  /// utilisent l'emplacement historique.
+  final String? storageKey;
+
+  String get enginePath => storageKey == null
+      ? AppStorage.legacyEngineStoragePath
+      : AppStorage.engineStoragePathFor(storageKey!);
 }

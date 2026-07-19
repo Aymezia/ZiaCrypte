@@ -98,12 +98,20 @@ class DeviceVerification {
   const DeviceVerification({
     required this.identity,
     required this.safetyNumber,
+    this.problem,
   });
 
   final ContactIdentity identity;
 
-  /// 60 chiffres. Affiché en groupes de 5 pour être lisible à voix haute.
+  /// 60 chiffres, vide si [problem] est renseigné.
   final String safetyNumber;
+
+  /// Renseigné quand aucun numéro ne peut être calculé, avec l'explication à
+  /// montrer. Vaut mieux qu'un numéro absent sans raison, ou qu'une exception
+  /// brute affichée à l'utilisateur.
+  final String? problem;
+
+  bool get usable => problem == null && safetyNumber.isNotEmpty;
 
   /// Découpe en 12 groupes de 5 chiffres, comme le fait Signal : lire
   /// soixante chiffres d'affilée au téléphone est une source d'erreurs.

@@ -127,9 +127,14 @@ class ChatService extends ChangeNotifier {
 
   SavedAccount? get savedAccount => AppStorage.loadAccount();
 
-  Future<FfiCryptoGateway> _openGateway() async {
+  /// Ouvre le moteur sur le dossier d'un compte.
+  ///
+  /// Chaque compte a le sien : une identité partagée entre deux comptes leur
+  /// ferait publier la même clé publique, et le serveur pourrait prouver qu'ils
+  /// sont la même personne.
+  Future<FfiCryptoGateway> _openGateway(String storagePath) async {
     final gateway = await FfiCryptoGateway.open(
-      AppStorage.engineStoragePath,
+      storagePath,
       libraryPath: _resolveLibrary(),
     );
     try {
@@ -148,7 +153,11 @@ class ChatService extends ChangeNotifier {
     _setBusy(true);
     try {
       final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
-      final gateway = await _openGateway();
+      // Dossier neuf tiré au hasard : le moteur n'y trouve aucune identité et
+      // en engendre une. Sans ça, créer un second compte sur cette machine
+      // réutiliserait la paire de clés du premier.
+      final storageKey = _uuidV4();
+      final gateway = await _openGateway(AppStorage.engineStoragePathFor(storageKey));
       final bundle = await gateway.generatePrekeyBundle();
 
       final res = await api.register(
@@ -169,6 +178,7 @@ class ChatService extends ChangeNotifier {
         username: user,
         userId: userId!,
         deviceId: deviceId!,
+        storageKey: storageKey,
       ));
       _setBusy(false);
     } catch (e) {
@@ -186,7 +196,7 @@ class ChatService extends ChangeNotifier {
     _setBusy(true);
     try {
       final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
-      final gateway = await _openGateway();
+      final gateway = await _openGateway(account.enginePath);
       final res = await api.login(
         username: account.username,
         password: password,
@@ -765,15 +775,33 @@ class ChatService extends ChangeNotifier {
     final myKey = await gateway.identityPublicKey();
     final out = <DeviceVerification>[];
     for (final identity in pinning.forUser(peerId)) {
-      final number = await pinning.safetyNumber(
-        myIdentityKey: myKey,
-        myUserId: me,
-        peerDeviceId: identity.deviceId,
-        peerUserId: peerId,
-      );
-      if (number != null) {
-        out.add(DeviceVerification(identity: identity, safetyNumber: number));
+      String? number;
+      String? problem;
+      try {
+        number = await pinning.safetyNumber(
+          myIdentityKey: myKey,
+          myUserId: me,
+          peerDeviceId: identity.deviceId,
+          peerUserId: peerId,
+        );
+      } on ZiaInvalidArgumentException {
+        // Le moteur refuse de calculer une empreinte quand les deux clés
+        // d'identité sont identiques. Ce n'est pas un incident technique mais
+        // une information : soit cet appareil est le nôtre, soit le serveur
+        // nous a renvoyé notre propre clé en la présentant comme celle du
+        // correspondant. Aucun numéro n'a de sens dans ce cas.
+        problem = 'Cet appareil publie la même clé d’identité que le tien. '
+            'Un numéro de sécurité n’a alors aucun sens : il ne pourrait pas '
+            'distinguer ton correspondant de toi-même.\n\n'
+            'Cela arrive si les deux comptes ont été créés sur cette machine '
+            'avec une version antérieure à 0.6.1, qui réutilisait la même '
+            'identité. Recrée l’un des deux comptes pour lui donner la sienne.';
       }
+      out.add(DeviceVerification(
+        identity: identity,
+        safetyNumber: number ?? '',
+        problem: problem,
+      ));
     }
     return out;
   }

@@ -93,6 +93,7 @@ class _VerificationSheetState extends State<VerificationSheet> {
   }
 
   Widget _deviceCard(ThemeData theme, DeviceVerification d) {
+    if (!d.usable) return _unusableCard(theme, d);
     final verified = d.identity.verified;
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -151,6 +152,30 @@ class _VerificationSheetState extends State<VerificationSheet> {
       ),
     );
   }
+
+  /// Aucun numéro calculable : on explique pourquoi au lieu de laisser une
+  /// case vide ou une exception à l'écran.
+  Widget _unusableCard(ThemeData theme, DeviceVerification d) => Card(
+        margin: const EdgeInsets.only(bottom: 16),
+        color: theme.colorScheme.errorContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.gpp_maybe_rounded,
+                  size: 18, color: theme.colorScheme.onErrorContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  d.problem!,
+                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 
   Future<void> _setVerified(DeviceVerification d, bool verified) async {
     await widget.service.markVerified(d.identity.deviceId, verified: verified);

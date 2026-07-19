@@ -27,6 +27,23 @@ export async function createDevice(
   const spk = decodeKey(reg.signedPrekey, PUBLIC_KEY_LEN, 'signedPrekey');
   const spkSig = decodeKey(reg.signedPrekeySignature, SIGNATURE_LEN, 'signedPrekeySignature');
 
+  // Une clé d'identité est propre à UN appareil. Deux appareils qui la
+  // partagent — cas rencontré quand un client réutilise le même stockage moteur
+  // pour deux comptes — permettent au serveur de prouver qu'ils appartiennent à
+  // la même personne, et rendent le handshake X3DH entre eux dégénéré (un DH
+  // d'une clé avec elle-même). Le serveur ne peut pas empêcher un client de mal
+  // faire, mais il peut refuser d'enregistrer le résultat.
+  const clash = await tx.device.findFirst({
+    where: { identityPublicKey: identityKey },
+    select: { id: true },
+  });
+  if (clash) {
+    throw new HttpError(
+      409,
+      'cette clé d’identité est déjà utilisée par un autre appareil',
+    );
+  }
+
   const device = await tx.device.create({
     data: {
       userId,
