@@ -53,6 +53,14 @@ class ChatService extends ChangeNotifier {
   String? error;
   bool busy = false;
 
+  /// Vrai quand le serveur a répondu qu'un second facteur est requis : le mot
+  /// de passe était bon, il manque le code. L'écran de connexion s'en sert pour
+  /// demander le code sans l'exiger d'emblée.
+  bool needsTotp = false;
+
+  /// Passe le second facteur au client REST courant (écran d'options).
+  ApiClient? get api => _api;
+
   bool get connected => userId != null;
 
   /// Conversations, la plus récemment active en tête.
@@ -197,6 +205,7 @@ class ChatService extends ChangeNotifier {
   Future<void> addDeviceAndConnect({
     required String user,
     required String password,
+    String? totp,
     String? serverUrl,
   }) async {
     _setBusy(true);
@@ -212,6 +221,7 @@ class ChatService extends ChangeNotifier {
       final res = await api.addDevice(
         username: user,
         password: password,
+        totp: totp,
         device: {
           'platform': _platformName(),
           'deviceName': _platformName(),
@@ -222,6 +232,7 @@ class ChatService extends ChangeNotifier {
         },
       );
 
+      needsTotp = false;
       await _adoptSession(api, gateway, res, user);
       AppStorage.saveAccount(SavedAccount(
         username: user,
@@ -231,12 +242,19 @@ class ChatService extends ChangeNotifier {
       ));
       _setBusy(false);
     } catch (e) {
+      if (_isTotpRequired(e)) {
+        needsTotp = true;
+        _setBusy(false,
+            err: 'Entre le code de ton application d’authentification.');
+        return;
+      }
       _setBusy(false, err: _humanize(e));
       rethrow;
     }
   }
 
-  Future<void> loginAndConnect({required String password, String? serverUrl}) async {
+  Future<void> loginAndConnect(
+      {required String password, String? totp, String? serverUrl}) async {
     final account = savedAccount;
     if (account == null) {
       _setBusy(false, err: 'Aucun compte enregistré sur cet appareil.');
@@ -250,13 +268,46 @@ class ChatService extends ChangeNotifier {
         username: account.username,
         password: password,
         deviceId: account.deviceId,
+        totp: totp,
       );
+      needsTotp = false;
       await _adoptSession(api, gateway, res, account.username);
       _setBusy(false);
     } catch (e) {
+      if (_isTotpRequired(e)) {
+        needsTotp = true;
+        _setBusy(false,
+            err: 'Entre le code de ton application d’authentification.');
+        return;
+      }
       _setBusy(false, err: _humanize(e));
       rethrow;
     }
+  }
+
+  /// Le serveur signale qu'un second facteur est requis (HTTP 428).
+  static bool _isTotpRequired(Object e) =>
+      e is DioException && e.response?.statusCode == 428;
+
+  // ------------------------------------------------- réglages du 2e facteur
+
+  Future<bool> twoFactorEnabled() async =>
+      await _api?.twoFactorEnabled() ?? false;
+
+  Future<Map<String, dynamic>> twoFactorSetup() async {
+    final api = _api;
+    if (api == null) throw StateError('non connecté');
+    return api.twoFactorSetup();
+  }
+
+  Future<void> twoFactorEnable(String code) async {
+    await _api?.twoFactorEnable(code);
+    notifyListeners();
+  }
+
+  Future<void> twoFactorDisable(String password, String code) async {
+    await _api?.twoFactorDisable(password, code);
+    notifyListeners();
   }
 
   Future<void> _adoptSession(

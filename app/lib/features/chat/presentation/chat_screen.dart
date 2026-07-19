@@ -3,15 +3,18 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/config/app_settings.dart';
+import '../../settings/presentation/settings_screen.dart';
 import '../data/chat_service.dart';
 import 'verification_sheet.dart';
 
 /// Écran principal : liste des conversations à gauche, conversation active à
 /// droite. Sur fenêtre étroite, la liste et la conversation s'alternent.
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.service});
+  const ChatScreen({super.key, required this.service, required this.settings});
 
   final ChatService service;
+  final AppSettings settings;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -329,6 +332,14 @@ class _ChatScreenState extends State<ChatScreen> {
               tooltip: 'Nouveau groupe',
               onPressed: s.busy ? null : _promptNewGroup,
               icon: const Icon(Icons.group_add_outlined),
+            ),
+            IconButton(
+              tooltip: 'Options',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => SettingsScreen(
+                    service: widget.service, settings: widget.settings),
+              )),
+              icon: const Icon(Icons.settings_outlined),
             ),
             IconButton(
               tooltip: 'Se déconnecter',

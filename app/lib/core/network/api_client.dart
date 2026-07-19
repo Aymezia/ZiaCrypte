@@ -43,11 +43,13 @@ class ApiClient {
     required String username,
     required String password,
     required String deviceId,
+    String? totp,
   }) async {
     final res = await _dio.post<Map<String, dynamic>>('/v1/auth/login', data: {
       'username': username,
       'password': password,
       'deviceId': deviceId,
+      if (totp != null) 'totp': totp,
     });
     return res.data!;
   }
@@ -72,10 +74,37 @@ class ApiClient {
     required String username,
     required String password,
     required Map<String, dynamic> device,
+    String? totp,
   }) async {
     final res = await _dio.post<Map<String, dynamic>>('/v1/auth/add-device',
-        data: {'username': username, 'password': password, 'device': device});
+        data: {
+          'username': username,
+          'password': password,
+          'device': device,
+          if (totp != null) 'totp': totp,
+        });
     return res.data!;
+  }
+
+  /// État du second facteur pour le compte courant.
+  Future<bool> twoFactorEnabled() async {
+    final res = await _dio.get<Map<String, dynamic>>('/v1/auth/2fa');
+    return res.data?['enabled'] as bool? ?? false;
+  }
+
+  /// Démarre l'enrôlement : renvoie le secret et l'URI otpauth à scanner.
+  Future<Map<String, dynamic>> twoFactorSetup() async {
+    final res = await _dio.post<Map<String, dynamic>>('/v1/auth/2fa/setup');
+    return res.data!;
+  }
+
+  Future<void> twoFactorEnable(String code) async {
+    await _dio.post<void>('/v1/auth/2fa/enable', data: {'code': code});
+  }
+
+  Future<void> twoFactorDisable(String password, String code) async {
+    await _dio.post<void>('/v1/auth/2fa/disable',
+        data: {'password': password, 'code': code});
   }
 
   /// Supprime le compte courant (mot de passe redemandé côté serveur).

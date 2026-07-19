@@ -17,6 +17,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final _server = TextEditingController(text: AppConfig.serverUrl);
   final _username = TextEditingController();
   final _password = TextEditingController();
+  final _totp = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   /// Les trois entrées possibles dans l'application.
@@ -31,7 +32,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
     _server.dispose();
     _username.dispose();
     _password.dispose();
+    _totp.dispose();
     super.dispose();
+  }
+
+  String? get _codeOrNull {
+    final c = _totp.text.trim();
+    return c.isEmpty ? null : c;
   }
 
   Future<void> _submit() async {
@@ -49,11 +56,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
           await widget.service.addDeviceAndConnect(
             user: _username.text.trim(),
             password: _password.text,
+            totp: _codeOrNull,
             serverUrl: serverUrl,
           );
         case _Mode.reconnexion:
           await widget.service.loginAndConnect(
             password: _password.text,
+            totp: _codeOrNull,
             serverUrl: serverUrl,
           );
       }
@@ -161,6 +170,28 @@ class _ConnectScreenState extends State<ConnectScreen> {
                             ? '8 caractères minimum'
                             : null,
                       ),
+
+                      // Champ de code affiché seulement quand le serveur l'a
+                      // réclamé : on ne demande pas le second facteur d'emblée,
+                      // le mot de passe validé déclenche la demande.
+                      if (s.needsTotp) ...[
+                        const SizedBox(height: 16),
+                        TextFormField(
+                          controller: _totp,
+                          keyboardType: TextInputType.number,
+                          maxLength: 6,
+                          autofocus: true,
+                          onFieldSubmitted: (_) => _submit(),
+                          decoration: const InputDecoration(
+                            labelText: 'Code de vérification',
+                            prefixIcon: Icon(Icons.pin_outlined),
+                            border: OutlineInputBorder(),
+                            counterText: '',
+                            helperText:
+                                'Le code à six chiffres de ton application',
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 24),
 
                       FilledButton(
