@@ -47,3 +47,6 @@ pubspec.lock
 
 app/linux/flutter/ephemeral/
 app/.dart_tool/
+
+# Bibliothèques natives Android (générées par build-android.sh)
+app/android/app/src/main/jniLibs/
