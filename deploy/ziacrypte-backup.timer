@@ -1,0 +1,13 @@
+[Unit]
+Description=Sauvegarde quotidienne de la base ZiaCrypte
+
+[Timer]
+OnCalendar=daily
+# Décalage aléatoire : évite de faire coïncider la sauvegarde avec les autres
+# tâches nocturnes de la machine.
+RandomizedDelaySec=30m
+# Rattrape la sauvegarde si la machine était éteinte à l'heure prévue.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

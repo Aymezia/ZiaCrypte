@@ -1,0 +1,32 @@
+[Unit]
+Description=Sauvegarde chiffrée de la base ZiaCrypte
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+
+# Identifiant de la clé PUBLIQUE de sauvegarde. La clé privée correspondante
+# ne doit PAS se trouver sur cette machine : c'est ce qui empêche un serveur
+# compromis de relire ses anciennes sauvegardes.
+Environment=ZIA_BACKUP_RECIPIENT=
+Environment=ZIA_BACKUP_DIR=/var/backups/ziacrypte
+Environment=ZIA_BACKUP_KEEP=14
+
+ExecStart=/home/ubuntu/ZiaCrypte/scripts/backup-db.sh
+
+# Le script s'arrête en erreur si pg_dump échoue : systemd le voit, et
+# `systemctl status` comme le journal le signalent. Une sauvegarde qui échoue
+# en silence est pire que pas de sauvegarde du tout — on croit en avoir une.
+StandardOutput=journal
+StandardError=journal
+
+# Le service n'a besoin d'écrire que dans le dossier des sauvegardes.
+ProtectSystem=strict
+ReadWritePaths=/var/backups/ziacrypte
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
