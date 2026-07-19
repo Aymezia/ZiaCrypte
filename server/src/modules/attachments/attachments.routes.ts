@@ -3,11 +3,11 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   PutObjectCommand,
-  S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { s3 } from '../../lib/storage.js';
 import { env } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
@@ -22,17 +22,6 @@ import { requireAuth } from '../../plugins/auth.js';
  * ni l'hébergeur du stockage ne peuvent lire quoi que ce soit.
  */
 
-const s3 = new S3Client({
-  endpoint: env.S3_ENDPOINT,
-  region: env.S3_REGION,
-  // Indispensable derrière un reverse proxy : sans cela le SDK viserait
-  // <bucket>.<hôte>, qui ne résout pas ici.
-  forcePathStyle: true,
-  credentials: {
-    accessKeyId: env.S3_ACCESS_KEY,
-    secretAccessKey: env.S3_SECRET_KEY,
-  },
-});
 
 const UPLOAD_TTL_SECONDS = 15 * 60;
 const DOWNLOAD_TTL_SECONDS = 60 * 60;

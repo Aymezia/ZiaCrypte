@@ -37,6 +37,12 @@ const schema = z.object({
   RATE_LIMIT_PASSWORD_WINDOW: z.string().default('5 minutes'),
   RATE_LIMIT_REGISTER_MAX: z.coerce.number().default(5),
   RATE_LIMIT_REGISTER_WINDOW: z.string().default('1 hour'),
+
+  // Rétention. Un blob déjà relevé est inatteignable par son destinataire :
+  // le conserver ne sert plus la remise, seulement à accumuler du chiffré et
+  // des métadonnées. Le délai laisse la place à une reprise côté client.
+  RETENTION_DELIVERED_HOURS: z.coerce.number().default(24),
+  RETENTION_INTERVAL_HOURS: z.coerce.number().default(6),
 });
 
 export const env = schema.parse(process.env);
