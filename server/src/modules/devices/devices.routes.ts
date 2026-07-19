@@ -77,6 +77,25 @@ export async function devicesRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
+  // État du pool de prekeys d'un appareil : permet au client de savoir quand
+  // le regarnir avant épuisement.
+  app.get('/devices/:deviceId/prekeys', { preHandler: requireAuth }, async (request) => {
+    const { deviceId } = z.object({ deviceId: z.string().uuid() }).parse(request.params);
+    await assertDeviceOwnedBy(deviceId, request.auth!.userId);
+
+    const oneTimePrekeysRemaining = await prisma.oneTimePrekey.count({
+      where: { deviceId, consumedAt: null },
+    });
+    const signed = await prisma.signedPrekey.findFirst({
+      where: { deviceId, isCurrent: true },
+    });
+
+    return {
+      oneTimePrekeysRemaining,
+      signedPrekeyExpiresAt: signed?.expiresAt ?? null,
+    };
+  });
+
   // Bundle X3DH du premier appareil actif de l'utilisateur. Consomme (une seule
   // fois) une one-time prekey si disponible.
   app.get('/users/:userId/prekey-bundle', { preHandler: requireAuth }, async (request) => {

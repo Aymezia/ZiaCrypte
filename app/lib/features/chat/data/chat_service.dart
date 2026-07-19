@@ -9,28 +9,14 @@ import '../../../core/config/app_config.dart';
 import '../../../core/config/app_storage.dart';
 import '../../../core/ffi/zia_crypto_exceptions.dart';
 import '../../../core/network/api_client.dart';
+import '../domain/chat_message.dart';
+import '../domain/conversation.dart';
 import '../domain/crypto_models.dart';
 import 'envelope.dart';
 import 'ffi_crypto_gateway.dart';
 
-class ChatMessage {
-  ChatMessage({required this.text, required this.mine, required this.at});
-  final String text;
-  final bool mine;
-  final DateTime at;
-
-  Map<String, Object?> toJson() => {
-        't': text,
-        'm': mine,
-        'a': at.millisecondsSinceEpoch,
-      };
-
-  static ChatMessage fromJson(Map<String, Object?> json) => ChatMessage(
-        text: json['t'] as String,
-        mine: json['m'] as bool,
-        at: DateTime.fromMillisecondsSinceEpoch(json['a'] as int),
-      );
-}
+export '../domain/chat_message.dart';
+export '../domain/conversation.dart';
 
 /// Orchestration de l'application : relie le moteur cryptographique natif au
 /// serveur. Aucune cryptographie ici — tout passe par le [FfiCryptoGateway].
@@ -45,45 +31,47 @@ class ChatService extends ChangeNotifier {
   String? userId;
   String? deviceId;
 
-  String? peerUsername;
-  String? peerUserId;
-  String? peerDeviceId;
-  String? conversationId;
-  int? _sessionId;
+  /// Conversations connues, indexées par identifiant de conversation.
+  final Map<String, Conversation> _conversations = {};
+  String? activeConversationId;
 
-  /// Matériel X3DH à joindre au premier message (côté initiateur uniquement).
-  HandshakeMaterial? _pendingHandshake;
+  /// Matériel X3DH en attente d'envoi, par conversation (premier message).
+  final Map<String, HandshakeMaterial> _pendingHandshakes = {};
 
-  final List<ChatMessage> messages = [];
   String? error;
   bool busy = false;
 
   bool get connected => userId != null;
-  bool get chatReady => _sessionId != null;
 
-  /// Localise la bibliothèque native : variable d'environnement, puis à côté de
-  /// l'exécutable, puis résolution par le chargeur système.
+  /// Conversations, la plus récemment active en tête.
+  List<Conversation> get conversations {
+    final list = _conversations.values.toList();
+    list.sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
+    return list;
+  }
+
+  Conversation? get active =>
+      activeConversationId == null ? null : _conversations[activeConversationId];
+
+  // ------------------------------------------------------------- utilitaires
+
+  /// Localise la bibliothèque native selon la plateforme.
   static String _resolveLibrary() {
     final fromEnv = Platform.environment['ZIA_CRYPTO_LIB'];
     if (fromEnv != null && File(fromEnv).existsSync()) return fromEnv;
 
-    // Nom et emplacement diffèrent selon la plateforme.
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
     final String fileName;
     final List<String> candidates;
-    final exeDir = File(Platform.resolvedExecutable).parent.path;
 
     if (Platform.isWindows) {
       fileName = 'zia_crypto.dll';
       candidates = ['$exeDir\\$fileName'];
     } else if (Platform.isMacOS) {
       fileName = 'libzia_crypto.dylib';
-      candidates = [
-        '$exeDir/../Frameworks/$fileName', // bundle .app
-        '$exeDir/$fileName',
-      ];
+      candidates = ['$exeDir/../Frameworks/$fileName', '$exeDir/$fileName'];
     } else if (Platform.isAndroid) {
-      // Chargée depuis les jniLibs de l'APK, par simple nom.
-      return 'libzia_crypto.so';
+      return 'libzia_crypto.so'; // chargée depuis les jniLibs de l'APK
     } else {
       fileName = 'libzia_crypto.so';
       candidates = ['$exeDir/lib/$fileName', '$exeDir/$fileName'];
@@ -92,7 +80,7 @@ class ChatService extends ChangeNotifier {
     for (final path in candidates) {
       if (File(path).existsSync()) return path;
     }
-    return fileName; // laisse le chargeur système résoudre
+    return fileName;
   }
 
   static String _uuidV4() {
@@ -105,31 +93,41 @@ class ChatService extends ChangeNotifier {
         '${h(8)}${h(9)}-${h(10)}${h(11)}${h(12)}${h(13)}${h(14)}${h(15)}';
   }
 
+  static String _platformName() {
+    if (Platform.isWindows) return 'windows';
+    if (Platform.isMacOS) return 'macos';
+    if (Platform.isAndroid) return 'android';
+    if (Platform.isIOS) return 'ios';
+    return 'linux';
+  }
+
   void _setBusy(bool value, {String? err}) {
     busy = value;
     error = err;
     notifyListeners();
   }
 
-  /// Compte déjà associé à cet appareil, s'il existe (permet la reconnexion).
+  /// Le moteur n'accepte que [A-Za-z0-9._-] comme nom d'entrée du coffre.
+  String _safeKey(String prefix, String id) =>
+      '$prefix-${id.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}';
+
+  // ---------------------------------------------------------------- connexion
+
   SavedAccount? get savedAccount => AppStorage.loadAccount();
 
-  /// Ouvre le moteur natif sur le stockage permanent de l'appareil. L'identité
-  /// y est rechargée si elle existe déjà ; sinon elle est créée puis persistée.
   Future<FfiCryptoGateway> _openGateway() async {
     final gateway = await FfiCryptoGateway.open(
       AppStorage.engineStoragePath,
       libraryPath: _resolveLibrary(),
     );
     try {
-      await gateway.identityPublicKey(); // déjà présente
+      await gateway.identityPublicKey();
     } on ZiaNotInitializedException {
       await gateway.generateIdentity();
     }
     return gateway;
   }
 
-  /// Crée un compte et son appareil, puis publie les prekeys.
   Future<void> registerAndConnect({
     required String user,
     required String password,
@@ -146,7 +144,7 @@ class ChatService extends ChangeNotifier {
         password: password,
         device: {
           'platform': _platformName(),
-          'deviceName': 'desktop',
+          'deviceName': _platformName(),
           'identityPublicKey': base64Encode(bundle.identityKey),
           'signedPrekey': base64Encode(bundle.signedPrekey),
           'signedPrekeySignature': base64Encode(bundle.signedPrekeySignature),
@@ -154,8 +152,7 @@ class ChatService extends ChangeNotifier {
         },
       );
 
-      _adoptSession(api, gateway, res, user);
-      // Mémorise le compte pour permettre la reconnexion au prochain lancement.
+      await _adoptSession(api, gateway, res, user);
       AppStorage.saveAccount(SavedAccount(
         username: user,
         userId: userId!,
@@ -168,8 +165,6 @@ class ChatService extends ChangeNotifier {
     }
   }
 
-  /// Reconnecte l'appareil à son compte existant : l'identité et les prekeys
-  /// sont déjà sur place, seul le mot de passe est redemandé.
   Future<void> loginAndConnect({required String password, String? serverUrl}) async {
     final account = savedAccount;
     if (account == null) {
@@ -180,14 +175,12 @@ class ChatService extends ChangeNotifier {
     try {
       final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
       final gateway = await _openGateway();
-
       final res = await api.login(
         username: account.username,
         password: password,
         deviceId: account.deviceId,
       );
-
-      _adoptSession(api, gateway, res, account.username);
+      await _adoptSession(api, gateway, res, account.username);
       _setBusy(false);
     } catch (e) {
       _setBusy(false, err: _humanize(e));
@@ -195,86 +188,166 @@ class ChatService extends ChangeNotifier {
     }
   }
 
-  // ---- Historique local, chiffré par le moteur ----
-
-  /// Nom de l'entrée du coffre pour une conversation donnée. Les caractères
-  /// hors [A-Za-z0-9._-] sont refusés par le moteur : on les remplace.
-  String _historyKey(String conversation) =>
-      'hist-${conversation.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}';
-
-  Future<void> _loadHistory(String conversation) async {
-    final gateway = _gateway;
-    if (gateway == null) return;
-    try {
-      final raw = await gateway.vaultRead(_historyKey(conversation));
-      messages.clear();
-      if (raw != null && raw.isNotEmpty) {
-        final list = jsonDecode(utf8.decode(raw)) as List;
-        messages.addAll(list
-            .cast<Map<String, dynamic>>()
-            .map((m) => ChatMessage.fromJson(m)));
-      }
-      notifyListeners();
-    } catch (_) {
-      // Un historique illisible ne doit pas empêcher de discuter.
-      messages.clear();
-    }
-  }
-
-  Future<void> _saveHistory() async {
-    final gateway = _gateway;
-    final conversation = conversationId;
-    if (gateway == null || conversation == null) return;
-    try {
-      final data = utf8.encode(jsonEncode(messages.map((m) => m.toJson()).toList()));
-      await gateway.vaultWrite(_historyKey(conversation), Uint8List.fromList(data));
-    } catch (e) {
-      error = 'Historique non enregistré : ${_humanize(e)}';
-      notifyListeners();
-    }
-  }
-
-  /// Oublie le compte local et revient à l'écran d'accueil.
-  void forgetAccount() {
-    AppStorage.clearAccount();
-    error = null;
-    notifyListeners();
-  }
-
-  void _adoptSession(
+  Future<void> _adoptSession(
     ApiClient api,
     FfiCryptoGateway gateway,
     Map<String, dynamic> res,
     String user,
-  ) {
+  ) async {
     api.accessToken = res['accessToken'] as String;
     _api = api;
     _gateway = gateway;
     username = user;
     userId = res['userId'] as String;
     deviceId = res['deviceId'] as String;
+
+    await _loadConversations();
     _startPolling();
+    unawaited(_replenishPrekeys());
   }
 
-  static String _platformName() {
-    if (Platform.isWindows) return 'windows';
-    if (Platform.isMacOS) return 'macos';
-    if (Platform.isAndroid) return 'android';
-    if (Platform.isIOS) return 'ios';
-    return 'linux';
+  /// Ferme la session sans effacer l'identité ni l'historique local.
+  Future<void> logout() async {
+    _poll?.cancel();
+    await _socket?.close();
+    _socket = null;
+    realtime = false;
+    await _gateway?.dispose();
+    _gateway = null;
+    _api = null;
+    userId = null;
+    deviceId = null;
+    _conversations.clear();
+    _pendingHandshakes.clear();
+    activeConversationId = null;
+    notifyListeners();
   }
 
-  /// Ouvre une conversation avec un correspondant et initie le handshake X3DH.
+  void forgetAccount() {
+    AppStorage.clearAccount();
+    error = null;
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------- persistance
+
+  Future<void> _loadConversations() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    try {
+      final raw = await gateway.vaultRead('convs');
+      if (raw == null || raw.isEmpty) return;
+      final list = jsonDecode(utf8.decode(raw)) as List;
+      for (final item in list.cast<Map<String, dynamic>>()) {
+        final conv = Conversation.fromJson(item);
+        conv.messages.addAll(await _readHistory(conv.id));
+        _conversations[conv.id] = conv;
+      }
+      notifyListeners();
+    } catch (_) {
+      // Une liste illisible ne doit pas empêcher d'utiliser l'application.
+    }
+  }
+
+  Future<void> _saveConversations() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    final data = jsonEncode(conversations.map((c) => c.toJson()).toList());
+    await gateway.vaultWrite('convs', Uint8List.fromList(utf8.encode(data)));
+  }
+
+  Future<List<ChatMessage>> _readHistory(String convId) async {
+    final gateway = _gateway;
+    if (gateway == null) return [];
+    try {
+      final raw = await gateway.vaultRead(_safeKey('hist', convId));
+      if (raw == null || raw.isEmpty) return [];
+      return (jsonDecode(utf8.decode(raw)) as List)
+          .cast<Map<String, dynamic>>()
+          .map(ChatMessage.fromJson)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _saveHistory(Conversation conv) async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    final data = jsonEncode(conv.messages.map((m) => m.toJson()).toList());
+    await gateway.vaultWrite(
+        _safeKey('hist', conv.id), Uint8List.fromList(utf8.encode(data)));
+  }
+
+  /// Enregistre l'état du ratchet. Sans cela un handshake complet serait refait
+  /// à chaque lancement et la chaîne de clés repartirait de zéro.
+  Future<void> _saveSession(Conversation conv) async {
+    final gateway = _gateway;
+    final sessionId = conv.sessionId;
+    if (gateway == null || sessionId == null) return;
+    try {
+      final blob = await gateway.exportSession(sessionId);
+      await gateway.vaultWrite(_safeKey('sess', conv.id), blob);
+    } catch (e) {
+      error = 'Session non enregistrée : ${_humanize(e)}';
+    }
+  }
+
+  /// Restaure la session d'une conversation ; false si aucune n'est enregistrée
+  /// (il faudra alors un handshake).
+  Future<bool> _restoreSession(Conversation conv) async {
+    final gateway = _gateway;
+    if (conv.sessionId != null) return true;
+    if (gateway == null) return false;
+    try {
+      final blob = await gateway.vaultRead(_safeKey('sess', conv.id));
+      if (blob == null || blob.isEmpty) return false;
+      conv.sessionId = await gateway.importSession(blob);
+      return true;
+    } catch (_) {
+      return false; // session illisible : on repartira sur un handshake
+    }
+  }
+
+  // ----------------------------------------------------------- conversations
+
+  void openConversation(String conversationId) {
+    final conv = _conversations[conversationId];
+    if (conv == null) return;
+    activeConversationId = conversationId;
+    error = null;
+    notifyListeners();
+    unawaited(_restoreSession(conv).then((_) => notifyListeners()));
+  }
+
+  void closeConversation() {
+    activeConversationId = null;
+    notifyListeners();
+  }
+
+  /// Ouvre — ou rouvre — une conversation avec un correspondant.
   Future<void> startChatWith(String peer) async {
-    final api = _api!;
-    final gateway = _gateway!;
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return;
     _setBusy(true);
     try {
       final user = await api.lookupUser(peer);
-      final pid = user['id'] as String;
-      final convId = await api.createConversation(pid);
-      final bundleJson = await api.prekeyBundle(pid);
+      final peerUserId = user['id'] as String;
+      final convId = await api.createConversation(peerUserId);
 
+      // Conversation déjà connue : on la rouvre avec sa session enregistrée
+      // plutôt que de refaire un handshake.
+      final existing = _conversations[convId];
+      if (existing != null) {
+        activeConversationId = convId;
+        if (await _restoreSession(existing)) {
+          _setBusy(false);
+          return;
+        }
+      }
+
+      final bundleJson = await api.prekeyBundle(peerUserId);
       final theirBundle = PrekeyBundle(
         identityKey: base64Decode(bundleJson['identityKey'] as String),
         signedPrekey: base64Decode(bundleJson['signedPrekey'] as String),
@@ -286,55 +359,77 @@ class ChatService extends ChangeNotifier {
       );
 
       final init = await gateway.startSession(theirBundle);
-      _sessionId = init.sessionId;
-      _pendingHandshake = init.handshake;
-      peerUsername = peer;
-      peerUserId = pid;
-      peerDeviceId = bundleJson['deviceId'] as String;
-      conversationId = convId;
-      await _loadHistory(convId);
+      final conv = existing ??
+          Conversation(
+            id: convId,
+            peerUsername: peer,
+            peerDeviceId: bundleJson['deviceId'] as String,
+          );
+      conv.peerUsername = peer;
+      conv.peerDeviceId = bundleJson['deviceId'] as String;
+      conv.sessionId = init.sessionId;
+      conv.handshakePending = true;
+      _pendingHandshakes[convId] = init.handshake;
+
+      if (existing == null) {
+        conv.messages.addAll(await _readHistory(convId));
+        _conversations[convId] = conv;
+      }
+      activeConversationId = convId;
+
+      await _saveConversations();
+      await _saveSession(conv);
       _setBusy(false);
     } catch (e) {
       _setBusy(false, err: _humanize(e));
     }
   }
 
-  /// Chiffre puis dépose le message sur le serveur.
   Future<void> send(String text) async {
-    if (_sessionId == null || _api == null) return;
+    final conv = active;
+    final api = _api;
+    final gateway = _gateway;
+    if (conv == null || api == null || gateway == null || !conv.ready) return;
+
     try {
-      final enc = await _gateway!.encrypt(
-        _sessionId!,
+      final enc = await gateway.encrypt(
+        conv.sessionId!,
         Uint8List.fromList(utf8.encode(text)),
       );
-      await _api!.sendMessage(
-        conversationId: conversationId!,
-        recipientDeviceId: peerDeviceId!,
+      await api.sendMessage(
+        conversationId: conv.id,
+        recipientDeviceId: conv.peerDeviceId,
         clientMessageId: _uuidV4(),
-        headerB64: base64Encode(Envelope.packHeader(enc.header, _pendingHandshake)),
+        headerB64: base64Encode(
+            Envelope.packHeader(enc.header, _pendingHandshakes[conv.id])),
         ciphertextB64: base64Encode(enc.ciphertext),
       );
-      _pendingHandshake = null; // joint une seule fois
-      messages.add(ChatMessage(text: text, mine: true, at: DateTime.now()));
+      _pendingHandshakes.remove(conv.id); // joint au premier message seulement
+      conv.handshakePending = false;
+
+      conv.messages.add(ChatMessage(text: text, mine: true, at: DateTime.now()));
+      conv.lastActivity = DateTime.now();
       notifyListeners();
-      await _saveHistory();
+
+      await _saveHistory(conv);
+      await _saveSession(conv); // le ratchet a avancé
+      await _saveConversations();
     } catch (e) {
       error = _humanize(e);
       notifyListeners();
     }
   }
 
+  // --------------------------------------------------------------- réception
+
   void _startPolling() {
     _poll?.cancel();
-    // Le WebSocket supprime la latence ; le relevé périodique reste en filet de
-    // sécurité (connexion coupée, notification perdue) — la remise ne doit
-    // jamais dépendre uniquement du temps réel.
+    // Le WebSocket supprime la latence ; le relevé périodique reste un filet de
+    // sécurité — la remise ne doit jamais dépendre du seul temps réel.
     _poll = Timer.periodic(const Duration(seconds: 15), (_) => _pollOnce());
     _connectRealtime();
   }
 
-  /// Ouvre la liaison temps réel : le serveur signale l'arrivée d'un blob, le
-  /// client relève alors sa boîte immédiatement.
   Future<void> _connectRealtime() async {
     final api = _api;
     if (api == null || api.accessToken == null) return;
@@ -352,17 +447,15 @@ class ChatService extends ChangeNotifier {
 
       socket.listen(
         (event) {
-          // Toute notification déclenche un relevé ; le contenu reste chiffré
-          // et n'est jamais transporté par le WebSocket.
           if (event is String && event.contains('message.pending')) _pollOnce();
         },
         onDone: _onRealtimeLost,
         onError: (_) => _onRealtimeLost(),
         cancelOnError: true,
       );
-      await _pollOnce(); // rattrape ce qui est arrivé avant la connexion
+      await _pollOnce();
     } catch (_) {
-      realtime = false; // le polling prend le relais
+      realtime = false;
       notifyListeners();
     }
   }
@@ -371,8 +464,6 @@ class ChatService extends ChangeNotifier {
     _socket = null;
     realtime = false;
     notifyListeners();
-    // Tentative de reconnexion : sans elle on retomberait silencieusement sur
-    // un simple relevé toutes les 15 s.
     Future<void>.delayed(const Duration(seconds: 3), () {
       if (_api != null && _socket == null) _connectRealtime();
     });
@@ -384,33 +475,41 @@ class ChatService extends ChangeNotifier {
     if (api == null || gateway == null) return;
     try {
       final incoming = await api.fetchMessages();
-      for (final m in incoming) {
-        final unpacked = Envelope.unpackHeader(base64Decode(m['header'] as String));
+      if (incoming.isEmpty) return;
 
-        // Premier message reçu : on devient le répondeur de la session.
-        if (unpacked.handshake != null && _sessionId == null) {
-          _sessionId = await gateway.acceptSession(unpacked.handshake!);
-          conversationId = m['conversationId'] as String;
-          peerDeviceId = m['senderDeviceId'] as String;
-          peerUsername = m['senderUsername'] as String?;
-          await _loadHistory(conversationId!);
+      final touched = <Conversation>{};
+      for (final m in incoming) {
+        final conv = await _resolveConversation(m);
+        final unpacked =
+            Envelope.unpackHeader(base64Decode(m['header'] as String));
+
+        // Première réception d'une session : on en devient le répondeur.
+        if (unpacked.handshake != null && !conv.ready) {
+          conv.sessionId = await gateway.acceptSession(unpacked.handshake!);
         }
-        if (_sessionId == null) continue;
+        if (!conv.ready) continue;
 
         final plain = await gateway.decrypt(
-          _sessionId!,
+          conv.sessionId!,
           unpacked.ratchetHeader,
           base64Decode(m['ciphertext'] as String),
         );
-        messages.add(ChatMessage(
+        conv.messages.add(ChatMessage(
           text: utf8.decode(plain),
           mine: false,
           at: DateTime.now(),
         ));
+        conv.lastActivity = DateTime.now();
+        touched.add(conv);
       }
-      if (incoming.isNotEmpty) {
+
+      for (final conv in touched) {
+        await _saveHistory(conv);
+        await _saveSession(conv);
+      }
+      if (touched.isNotEmpty) {
+        await _saveConversations();
         notifyListeners();
-        await _saveHistory();
       }
     } catch (e) {
       error = _humanize(e);
@@ -418,13 +517,62 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Retrouve la conversation d'un message entrant, ou la crée si un
+  /// correspondant nous écrit pour la première fois.
+  Future<Conversation> _resolveConversation(Map<String, dynamic> m) async {
+    final convId = m['conversationId'] as String;
+    final existing = _conversations[convId];
+    if (existing != null) {
+      await _restoreSession(existing);
+      return existing;
+    }
+
+    final conv = Conversation(
+      id: convId,
+      peerUsername: (m['senderUsername'] as String?) ?? 'inconnu',
+      peerDeviceId: m['senderDeviceId'] as String,
+    );
+    conv.messages.addAll(await _readHistory(convId));
+    await _restoreSession(conv);
+    _conversations[convId] = conv;
+    return conv;
+  }
+
+  // ----------------------------------------------------------------- prekeys
+
+  /// Regarnit le pool de one-time prekeys : chaque nouveau correspondant en
+  /// consomme une, et sans réapprovisionnement le serveur finit par n'en avoir
+  /// plus à distribuer — les nouvelles sessions perdent alors une garantie.
+  Future<void> _replenishPrekeys() async {
+    final api = _api;
+    final gateway = _gateway;
+    final device = deviceId;
+    if (api == null || gateway == null || device == null) return;
+    try {
+      final remaining = await api.oneTimePrekeyCount(device);
+      if (remaining >= 10) return;
+
+      final keys = <String>[];
+      for (var i = remaining; i < 20; i++) {
+        final bundle = await gateway.generatePrekeyBundle();
+        final otpk = bundle.oneTimePrekey;
+        if (otpk != null) keys.add(base64Encode(otpk));
+      }
+      if (keys.isNotEmpty) await api.uploadPrekeys(device, oneTimePrekeys: keys);
+    } catch (_) {
+      // Sans conséquence immédiate : nouvelle tentative à la prochaine connexion.
+    }
+  }
+
+  // ------------------------------------------------------------------ divers
+
   String _humanize(Object e) {
     final s = e.toString();
     if (s.contains('409')) return 'Ce nom d’utilisateur est déjà pris.';
     if (s.contains('404')) return 'Utilisateur introuvable.';
     if (s.contains('401')) return 'Identifiants refusés.';
     if (s.contains('Connection refused') || s.contains('SocketException')) {
-      return 'Serveur injoignable — vérifie l’adresse.';
+      return 'Serveur injoignable — vérifie ta connexion.';
     }
     return s;
   }

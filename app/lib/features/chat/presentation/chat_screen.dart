@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../data/chat_service.dart';
 
-/// Écran principal : choix du correspondant puis conversation chiffrée.
+/// Écran principal : liste des conversations à gauche, conversation active à
+/// droite. Sur fenêtre étroite, la liste et la conversation s'alternent.
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.service});
 
@@ -13,13 +14,12 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final _peer = TextEditingController();
   final _input = TextEditingController();
   final _scroll = ScrollController();
+  int _lastMessageCount = 0;
 
   @override
   void dispose() {
-    _peer.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -30,10 +30,11 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty) return;
     _input.clear();
     await widget.service.send(text);
-    _scrollToEnd();
   }
 
-  void _scrollToEnd() {
+  void _scrollToEndIfNeeded(int count) {
+    if (count == _lastMessageCount) return;
+    _lastMessageCount = count;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.animateTo(
@@ -45,6 +46,39 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  Future<void> _promptNewConversation() async {
+    final controller = TextEditingController();
+    final peer = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Nouvelle conversation'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Pseudo du correspondant',
+            prefixIcon: Icon(Icons.alternate_email),
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Démarrer'),
+          ),
+        ],
+      ),
+    );
+    if (peer != null && peer.isNotEmpty) {
+      await widget.service.startChatWith(peer);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -52,92 +86,144 @@ class _ChatScreenState extends State<ChatScreen> {
       listenable: widget.service,
       builder: (context, _) {
         final s = widget.service;
+        final wide = MediaQuery.of(context).size.width >= 720;
+        final conv = s.active;
+        _scrollToEndIfNeeded(conv?.messages.length ?? 0);
+
+        // Fenêtre étroite : on affiche soit la liste, soit la conversation.
+        if (!wide) {
+          return conv == null
+              ? _listScaffold(theme, s)
+              : _conversationScaffold(theme, s, showBack: true);
+        }
+
         return Scaffold(
-          appBar: AppBar(
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s.peerUsername ?? 'ZiaCrypte'),
-                Text(
-                  s.chatReady
-                      ? 'Chiffré de bout en bout'
-                      : 'Connecté en tant que ${s.username}',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
-            actions: [
-              if (s.chatReady)
-                const Padding(
-                  padding: EdgeInsets.only(right: 16),
-                  child: Icon(Icons.lock_rounded, size: 18),
-                ),
+          body: Row(
+            children: [
+              SizedBox(
+                width: 300,
+                child: _conversationList(theme, s),
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: conv == null
+                    ? _emptyState(theme)
+                    : _conversationPane(theme, s),
+              ),
             ],
           ),
-          body: s.chatReady ? _conversation(theme, s) : _peerPicker(theme, s),
         );
       },
     );
   }
 
-  Widget _peerPicker(ThemeData theme, ChatService s) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
+  // ---------------------------------------------------------------- liste
+
+  Widget _listScaffold(ThemeData theme, ChatService s) => Scaffold(
+        body: _conversationList(theme, s),
+      );
+
+  Widget _conversationList(ThemeData theme, ChatService s) {
+    final convs = s.conversations;
+    return Column(
+      children: [
+        AppBar(
+          automaticallyImplyLeading: false,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(s.username ?? 'ZiaCrypte'),
+              Row(
+                children: [
+                  Icon(
+                    s.realtime ? Icons.bolt_rounded : Icons.schedule_rounded,
+                    size: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    s.realtime ? 'Temps réel' : 'Reconnexion…',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            IconButton(
+              tooltip: 'Nouvelle conversation',
+              onPressed: s.busy ? null : _promptNewConversation,
+              icon: const Icon(Icons.edit_square),
+            ),
+            IconButton(
+              tooltip: 'Se déconnecter',
+              onPressed: () => s.logout(),
+              icon: const Icon(Icons.logout_rounded),
+            ),
+          ],
+        ),
+        if (s.error != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            color: theme.colorScheme.errorContainer,
+            child: Text(s.error!,
+                style: TextStyle(
+                    fontSize: 12, color: theme.colorScheme.onErrorContainer)),
+          ),
+        Expanded(
+          child: convs.isEmpty
+              ? _noConversations(theme)
+              : ListView.builder(
+                  itemCount: convs.length,
+                  itemBuilder: (context, i) {
+                    final c = convs[i];
+                    final selected = c.id == s.activeConversationId;
+                    final last = c.lastMessage;
+                    return ListTile(
+                      selected: selected,
+                      selectedTileColor: theme.colorScheme.surfaceContainerHighest,
+                      leading: CircleAvatar(
+                        backgroundColor: theme.colorScheme.primaryContainer,
+                        child: Text(
+                          c.peerUsername.characters.first.toUpperCase(),
+                          style: TextStyle(
+                              color: theme.colorScheme.onPrimaryContainer),
+                        ),
+                      ),
+                      title: Text(c.peerUsername,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(
+                        last == null
+                            ? 'Aucun message'
+                            : '${last.mine ? "Vous : " : ""}${last.text}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => s.openConversation(c.id),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _noConversations(ThemeData theme) => Center(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Icon(Icons.forum_outlined,
-                  size: 48, color: theme.colorScheme.primary),
-              const SizedBox(height: 16),
-              Text('Démarrer une conversation',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.titleLarge),
-              const SizedBox(height: 8),
+                  size: 40, color: theme.colorScheme.primary),
+              const SizedBox(height: 12),
+              Text('Aucune conversation',
+                  style: theme.textTheme.titleMedium,
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 6),
               Text(
-                'Indique le pseudo de ton correspondant. Il doit être inscrit '
-                'sur le même serveur.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _peer,
-                decoration: const InputDecoration(
-                  labelText: 'Pseudo du correspondant',
-                  prefixIcon: Icon(Icons.alternate_email),
-                  border: OutlineInputBorder(),
-                ),
-                onSubmitted: (v) => s.startChatWith(v.trim()),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: s.busy
-                    ? null
-                    : () => s.startChatWith(_peer.text.trim()),
-                style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16)),
-                child: s.busy
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Démarrer'),
-              ),
-              if (s.error != null) ...[
-                const SizedBox(height: 16),
-                Text(s.error!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: theme.colorScheme.error)),
-              ],
-              const SizedBox(height: 24),
-              Text(
-                'En attente : si quelqu’un t’écrit en premier, la conversation '
-                's’ouvrira automatiquement.',
+                'Démarres-en une, ou attends qu’on t’écrive.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -145,15 +231,65 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ),
         ),
-      ),
+      );
+
+  Widget _emptyState(ThemeData theme) => Center(
+        child: Text('Sélectionne une conversation',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+      );
+
+  // --------------------------------------------------------- conversation
+
+  Widget _conversationScaffold(ThemeData theme, ChatService s,
+          {bool showBack = false}) =>
+      Scaffold(
+        appBar: AppBar(
+          leading: showBack
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: s.closeConversation,
+                )
+              : null,
+          title: _conversationTitle(theme, s),
+        ),
+        body: _messagesAndComposer(theme, s),
+      );
+
+  Widget _conversationPane(ThemeData theme, ChatService s) => Column(
+        children: [
+          AppBar(
+            automaticallyImplyLeading: false,
+            title: _conversationTitle(theme, s),
+          ),
+          Expanded(child: _messagesAndComposer(theme, s)),
+        ],
+      );
+
+  Widget _conversationTitle(ThemeData theme, ChatService s) {
+    final conv = s.active!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(conv.peerUsername),
+        Row(
+          children: [
+            Icon(Icons.lock_rounded,
+                size: 11, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+            Text('Chiffré de bout en bout', style: theme.textTheme.bodySmall),
+          ],
+        ),
+      ],
     );
   }
 
-  Widget _conversation(ThemeData theme, ChatService s) {
+  Widget _messagesAndComposer(ThemeData theme, ChatService s) {
+    final conv = s.active!;
     return Column(
       children: [
         Expanded(
-          child: s.messages.isEmpty
+          child: conv.messages.isEmpty
               ? Center(
                   child: Text('Aucun message pour l’instant',
                       style: theme.textTheme.bodyMedium?.copyWith(
@@ -161,10 +297,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 )
               : ListView.builder(
                   controller: _scroll,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  itemCount: s.messages.length,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  itemCount: conv.messages.length,
                   itemBuilder: (context, i) {
-                    final m = s.messages[i];
+                    final m = conv.messages[i];
                     return Align(
                       alignment:
                           m.mine ? Alignment.centerRight : Alignment.centerLeft,
@@ -202,11 +339,13 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: TextField(
                     controller: _input,
                     onSubmitted: (_) => _send(),
+                    enabled: conv.ready,
                     decoration: InputDecoration(
-                      hintText: 'Message chiffré…',
+                      hintText: conv.ready
+                          ? 'Message chiffré…'
+                          : 'Session en cours d’ouverture…',
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                      ),
+                          borderRadius: BorderRadius.circular(24)),
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 20, vertical: 14),
                     ),
@@ -214,7 +353,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  onPressed: _send,
+                  onPressed: conv.ready ? _send : null,
                   icon: const Icon(Icons.send_rounded),
                   padding: const EdgeInsets.all(14),
                 ),

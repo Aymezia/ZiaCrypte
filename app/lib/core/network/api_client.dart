@@ -87,6 +87,27 @@ class ApiClient {
     });
   }
 
+  /// Nombre de one-time prekeys encore disponibles pour cet appareil.
+  Future<int> oneTimePrekeyCount(String deviceId) async {
+    final res = await _dio.get<Map<String, dynamic>>('/v1/devices/$deviceId/prekeys');
+    return (res.data?['oneTimePrekeysRemaining'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Publie de nouvelles prekeys (clés publiques uniquement).
+  Future<void> uploadPrekeys(
+    String deviceId, {
+    List<String> oneTimePrekeys = const [],
+    String? signedPrekey,
+    String? signedPrekeySignature,
+  }) async {
+    await _dio.post<void>('/v1/devices/$deviceId/prekeys', data: {
+      'oneTimePrekeys': oneTimePrekeys,
+      if (signedPrekey != null) 'signedPrekey': signedPrekey,
+      if (signedPrekeySignature != null)
+        'signedPrekeySignature': signedPrekeySignature,
+    });
+  }
+
   /// Relève les blobs chiffrés en attente pour l'appareil courant.
   Future<List<Map<String, dynamic>>> fetchMessages() async {
     final res = await _dio.get<List<dynamic>>('/v1/messages');
