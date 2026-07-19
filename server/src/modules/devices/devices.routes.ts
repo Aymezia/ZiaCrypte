@@ -96,6 +96,49 @@ export async function devicesRoutes(app: FastifyInstance) {
     };
   });
 
+  // Bundles X3DH de TOUS les appareils actifs d'un utilisateur : l'émetteur
+  // doit chiffrer séparément pour chacun, sinon les autres appareils du
+  // destinataire ne verraient jamais le message.
+  app.get('/users/:userId/prekey-bundles', { preHandler: requireAuth }, async (request) => {
+    const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
+
+    const devices = await prisma.device.findMany({
+      where: { userId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (devices.length === 0) throw new HttpError(404, 'aucun appareil actif');
+
+    const bundles = [];
+    for (const device of devices) {
+      const signed = await prisma.signedPrekey.findFirst({
+        where: { deviceId: device.id, isCurrent: true },
+      });
+      if (!signed) continue; // appareil sans signed prekey : inutilisable
+
+      const otpk = await prisma.oneTimePrekey.findFirst({
+        where: { deviceId: device.id, consumedAt: null },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (otpk) {
+        await prisma.oneTimePrekey.update({
+          where: { id: otpk.id },
+          data: { consumedAt: new Date() },
+        });
+      }
+
+      bundles.push({
+        deviceId: device.id,
+        identityKey: b64(device.identityPublicKey),
+        signedPrekey: b64(signed.publicKey),
+        signedPrekeySignature: b64(signed.signature),
+        oneTimePrekey: otpk ? b64(otpk.publicKey) : null,
+      });
+    }
+
+    if (bundles.length === 0) throw new HttpError(404, 'aucun signed prekey');
+    return bundles;
+  });
+
   // Bundle X3DH du premier appareil actif de l'utilisateur. Consomme (une seule
   // fois) une one-time prekey si disponible.
   app.get('/users/:userId/prekey-bundle', { preHandler: requireAuth }, async (request) => {

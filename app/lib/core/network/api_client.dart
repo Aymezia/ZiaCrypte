@@ -58,6 +58,29 @@ class ApiClient {
     return res.data!;
   }
 
+  /// Bundles de tous les appareils actifs d'un utilisateur (multi-appareils).
+  Future<List<Map<String, dynamic>>> prekeyBundles(String userId) async {
+    final res =
+        await _dio.get<List<dynamic>>('/v1/users/$userId/prekey-bundles');
+    return (res.data ?? []).cast<Map<String, dynamic>>();
+  }
+
+  /// Rattache un nouvel appareil à un compte existant.
+  Future<Map<String, dynamic>> addDevice({
+    required String username,
+    required String password,
+    required Map<String, dynamic> device,
+  }) async {
+    final res = await _dio.post<Map<String, dynamic>>('/v1/auth/add-device',
+        data: {'username': username, 'password': password, 'device': device});
+    return res.data!;
+  }
+
+  /// Supprime le compte courant (mot de passe redemandé côté serveur).
+  Future<void> deleteAccount(String password) async {
+    await _dio.delete<void>('/v1/users/me', data: {'password': password});
+  }
+
   Future<Map<String, dynamic>> prekeyBundle(String userId) async {
     final res = await _dio.get<Map<String, dynamic>>('/v1/users/$userId/prekey-bundle');
     return res.data!;

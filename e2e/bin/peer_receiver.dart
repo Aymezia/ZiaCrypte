@@ -30,16 +30,20 @@ Future<void> main(List<String> args) async {
   final soPath = args.length > 1 ? args[1] : 'libzia_crypto.so';
   final username = args.length > 2 ? args[2] : 'bob_gui';
   final seconds = args.length > 3 ? int.parse(args[3]) : 60;
+  // « add » rattache un SECOND appareil au compte existant au lieu d'en créer
+  // un nouveau : c'est ainsi qu'on teste le multi-appareils.
+  final addDevice = args.length > 4 && args[4] == 'add';
+  final storageSuffix = addDevice ? '${username}_2' : username;
 
   final gateway = await FfiCryptoGateway.open(
-    '${Directory.systemTemp.path}/zia_peer_$username',
+    '${Directory.systemTemp.path}/zia_peer_$storageSuffix',
     libraryPath: soPath,
   );
   await gateway.generateIdentity();
   final bundle = await gateway.generatePrekeyBundle();
 
   final reg = await http.post(
-    Uri.parse('$baseUrl/v1/auth/register'),
+    Uri.parse('$baseUrl/v1/auth/${addDevice ? 'add-device' : 'register'}'),
     headers: {'Content-Type': 'application/json'},
     body: jsonEncode({
       'username': username,
@@ -59,7 +63,8 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
   final token = (jsonDecode(reg.body) as Map)['accessToken'] as String;
-  stdout.writeln('PRET: $username inscrit, en attente de messages…');
+  stdout.writeln('PRET: $username ${addDevice ? '(2e appareil)' : '(1er appareil)'}'
+      ' inscrit, en attente de messages…');
 
   int? sessionId;
   final deadline = DateTime.now().add(Duration(seconds: seconds));

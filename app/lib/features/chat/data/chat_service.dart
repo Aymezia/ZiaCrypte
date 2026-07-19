@@ -281,31 +281,37 @@ class ChatService extends ChangeNotifier {
 
   /// Enregistre l'état du ratchet. Sans cela un handshake complet serait refait
   /// à chaque lancement et la chaîne de clés repartirait de zéro.
-  Future<void> _saveSession(Conversation conv) async {
+  /// Enregistre l'état du ratchet de chaque appareil. Sans cela un handshake
+  /// complet serait refait à chaque lancement et la chaîne de clés repartirait
+  /// de zéro.
+  Future<void> _saveSessions(Conversation conv) async {
     final gateway = _gateway;
-    final sessionId = conv.sessionId;
-    if (gateway == null || sessionId == null) return;
-    try {
-      final blob = await gateway.exportSession(sessionId);
-      await gateway.vaultWrite(_safeKey('sess', conv.id), blob);
-    } catch (e) {
-      error = 'Session non enregistrée : ${_humanize(e)}';
+    if (gateway == null) return;
+    for (final entry in conv.sessions.entries) {
+      try {
+        final blob = await gateway.exportSession(entry.value);
+        await gateway.vaultWrite(
+            _safeKey('sess', '${conv.id}-${entry.key}'), blob);
+      } catch (e) {
+        error = 'Session non enregistrée : ${_humanize(e)}';
+      }
     }
   }
 
-  /// Restaure la session d'une conversation ; false si aucune n'est enregistrée
-  /// (il faudra alors un handshake).
-  Future<bool> _restoreSession(Conversation conv) async {
+  /// Restaure les sessions enregistrées pour chaque appareil connu.
+  Future<void> _restoreSessions(Conversation conv) async {
     final gateway = _gateway;
-    if (conv.sessionId != null) return true;
-    if (gateway == null) return false;
-    try {
-      final blob = await gateway.vaultRead(_safeKey('sess', conv.id));
-      if (blob == null || blob.isEmpty) return false;
-      conv.sessionId = await gateway.importSession(blob);
-      return true;
-    } catch (_) {
-      return false; // session illisible : on repartira sur un handshake
+    if (gateway == null) return;
+    for (final device in conv.targetDeviceIds) {
+      if (conv.sessions.containsKey(device)) continue;
+      try {
+        final blob =
+            await gateway.vaultRead(_safeKey('sess', '${conv.id}-$device'));
+        if (blob == null || blob.isEmpty) continue;
+        conv.sessions[device] = await gateway.importSession(blob);
+      } catch (_) {
+        // Session illisible : cet appareil repassera par un handshake.
+      }
     }
   }
 
@@ -317,7 +323,7 @@ class ChatService extends ChangeNotifier {
     activeConversationId = conversationId;
     error = null;
     notifyListeners();
-    unawaited(_restoreSession(conv).then((_) => notifyListeners()));
+    unawaited(_restoreSessions(conv).then((_) => notifyListeners()));
   }
 
   void closeConversation() {
@@ -326,6 +332,10 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Ouvre — ou rouvre — une conversation avec un correspondant.
+  ///
+  /// Une session est établie avec **chacun de ses appareils**, et avec les
+  /// autres appareils de l'utilisateur lui-même pour qu'il y retrouve ses
+  /// propres messages.
   Future<void> startChatWith(String peer) async {
     final api = _api;
     final gateway = _gateway;
@@ -336,18 +346,41 @@ class ChatService extends ChangeNotifier {
       final peerUserId = user['id'] as String;
       final convId = await api.createConversation(peerUserId);
 
-      // Conversation déjà connue : on la rouvre avec sa session enregistrée
-      // plutôt que de refaire un handshake.
-      final existing = _conversations[convId];
-      if (existing != null) {
-        activeConversationId = convId;
-        if (await _restoreSession(existing)) {
-          _setBusy(false);
-          return;
-        }
+      final conv = _conversations[convId] ??
+          Conversation(id: convId, peerUsername: peer);
+      conv.peerUsername = peer;
+      if (!_conversations.containsKey(convId)) {
+        conv.messages.addAll(await _readHistory(convId));
+        _conversations[convId] = conv;
       }
+      activeConversationId = convId;
 
-      final bundleJson = await api.prekeyBundle(peerUserId);
+      await _restoreSessions(conv);
+      await _openSessionsWith(conv, peerUserId);
+      if (userId != null) await _openSessionsWith(conv, userId!);
+
+      await _saveConversations();
+      await _saveSessions(conv);
+      _setBusy(false);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+    }
+  }
+
+  /// Établit une session avec chaque appareil d'un utilisateur qui n'en a pas
+  /// encore. L'appareil courant est ignoré (on ne s'écrit pas à soi-même).
+  Future<void> _openSessionsWith(Conversation conv, String targetUserId) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return;
+
+    final bundles = await api.prekeyBundles(targetUserId);
+    for (final bundleJson in bundles) {
+      final device = bundleJson['deviceId'] as String;
+      if (device == deviceId) continue; // cet appareil-ci
+      conv.targetDeviceIds.add(device);
+      if (conv.sessions.containsKey(device)) continue;
+
       final theirBundle = PrekeyBundle(
         identityKey: base64Decode(bundleJson['identityKey'] as String),
         signedPrekey: base64Decode(bundleJson['signedPrekey'] as String),
@@ -357,31 +390,9 @@ class ChatService extends ChangeNotifier {
             ? base64Decode(bundleJson['oneTimePrekey'] as String)
             : null,
       );
-
       final init = await gateway.startSession(theirBundle);
-      final conv = existing ??
-          Conversation(
-            id: convId,
-            peerUsername: peer,
-            peerDeviceId: bundleJson['deviceId'] as String,
-          );
-      conv.peerUsername = peer;
-      conv.peerDeviceId = bundleJson['deviceId'] as String;
-      conv.sessionId = init.sessionId;
-      conv.handshakePending = true;
-      _pendingHandshakes[convId] = init.handshake;
-
-      if (existing == null) {
-        conv.messages.addAll(await _readHistory(convId));
-        _conversations[convId] = conv;
-      }
-      activeConversationId = convId;
-
-      await _saveConversations();
-      await _saveSession(conv);
-      _setBusy(false);
-    } catch (e) {
-      _setBusy(false, err: _humanize(e));
+      conv.sessions[device] = init.sessionId;
+      _pendingHandshakes['${conv.id}-$device'] = init.handshake;
     }
   }
 
@@ -392,27 +403,42 @@ class ChatService extends ChangeNotifier {
     if (conv == null || api == null || gateway == null || !conv.ready) return;
 
     try {
-      final enc = await gateway.encrypt(
-        conv.sessionId!,
-        Uint8List.fromList(utf8.encode(text)),
-      );
-      await api.sendMessage(
-        conversationId: conv.id,
-        recipientDeviceId: conv.peerDeviceId,
-        clientMessageId: _uuidV4(),
-        headerB64: base64Encode(
-            Envelope.packHeader(enc.header, _pendingHandshakes[conv.id])),
-        ciphertextB64: base64Encode(enc.ciphertext),
-      );
-      _pendingHandshakes.remove(conv.id); // joint au premier message seulement
-      conv.handshakePending = false;
+      final clearText = Uint8List.fromList(utf8.encode(text));
+      var delivered = 0;
+
+      // Chaque appareil a sa propre session : le message est chiffré autant de
+      // fois qu'il y a de destinataires. Le serveur ne voit que des blobs.
+      for (final device in conv.sessions.keys.toList()) {
+        final sessionId = conv.sessions[device];
+        if (sessionId == null) continue;
+        try {
+          final enc = await gateway.encrypt(sessionId, clearText);
+          final handshake = _pendingHandshakes['${conv.id}-$device'];
+          await api.sendMessage(
+            conversationId: conv.id,
+            recipientDeviceId: device,
+            clientMessageId: _uuidV4(),
+            headerB64: base64Encode(Envelope.packHeader(enc.header, handshake)),
+            ciphertextB64: base64Encode(enc.ciphertext),
+          );
+          _pendingHandshakes.remove('${conv.id}-$device');
+          delivered++;
+        } catch (e) {
+          // Un appareil injoignable ne doit pas bloquer les autres.
+          error = 'Un appareil n’a pas reçu le message : ${_humanize(e)}';
+        }
+      }
+      if (delivered == 0) {
+        notifyListeners();
+        return;
+      }
 
       conv.messages.add(ChatMessage(text: text, mine: true, at: DateTime.now()));
       conv.lastActivity = DateTime.now();
       notifyListeners();
 
       await _saveHistory(conv);
-      await _saveSession(conv); // le ratchet a avancé
+      await _saveSessions(conv); // les ratchets ont avancé
       await _saveConversations();
     } catch (e) {
       error = _humanize(e);
@@ -480,23 +506,31 @@ class ChatService extends ChangeNotifier {
       final touched = <Conversation>{};
       for (final m in incoming) {
         final conv = await _resolveConversation(m);
+        final sender = m['senderDeviceId'] as String;
         final unpacked =
             Envelope.unpackHeader(base64Decode(m['header'] as String));
 
-        // Première réception d'une session : on en devient le répondeur.
-        if (unpacked.handshake != null && !conv.ready) {
-          conv.sessionId = await gateway.acceptSession(unpacked.handshake!);
+        // Chaque appareil expéditeur a sa propre session : la première
+        // réception depuis un appareil nous en fait le répondeur.
+        if (unpacked.handshake != null && !conv.sessions.containsKey(sender)) {
+          conv.sessions[sender] = await gateway.acceptSession(unpacked.handshake!);
+          conv.targetDeviceIds.add(sender);
         }
-        if (!conv.ready) continue;
+        final sessionId = conv.sessions[sender];
+        if (sessionId == null) continue;
 
         final plain = await gateway.decrypt(
-          conv.sessionId!,
+          sessionId,
           unpacked.ratchetHeader,
           base64Decode(m['ciphertext'] as String),
         );
+
+        // Un message émis par un autre de mes appareils est un message que
+        // j'ai écrit : il s'affiche comme tel plutôt que comme reçu.
+        final fromMyself = (m['senderUsername'] as String?) == username;
         conv.messages.add(ChatMessage(
           text: utf8.decode(plain),
-          mine: false,
+          mine: fromMyself,
           at: DateTime.now(),
         ));
         conv.lastActivity = DateTime.now();
@@ -505,7 +539,7 @@ class ChatService extends ChangeNotifier {
 
       for (final conv in touched) {
         await _saveHistory(conv);
-        await _saveSession(conv);
+        await _saveSessions(conv);
       }
       if (touched.isNotEmpty) {
         await _saveConversations();
@@ -523,17 +557,17 @@ class ChatService extends ChangeNotifier {
     final convId = m['conversationId'] as String;
     final existing = _conversations[convId];
     if (existing != null) {
-      await _restoreSession(existing);
+      await _restoreSessions(existing);
       return existing;
     }
 
     final conv = Conversation(
       id: convId,
       peerUsername: (m['senderUsername'] as String?) ?? 'inconnu',
-      peerDeviceId: m['senderDeviceId'] as String,
+      targetDeviceIds: {m['senderDeviceId'] as String},
     );
     conv.messages.addAll(await _readHistory(convId));
-    await _restoreSession(conv);
+    await _restoreSessions(conv);
     _conversations[convId] = conv;
     return conv;
   }
