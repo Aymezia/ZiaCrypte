@@ -66,7 +66,14 @@ Future<void> main(List<String> args) async {
   stdout.writeln('PRET: $username ${addDevice ? '(2e appareil)' : '(1er appareil)'}'
       ' inscrit, en attente de messages…');
 
-  int? sessionId;
+  // UNE SESSION PAR APPAREIL EXPÉDITEUR.
+  //
+  // Une variable unique suffisait tant qu'un seul correspondant écrivait. Dès
+  // qu'un second ouvrait une conversation, son handshake était ignoré et ses
+  // messages étaient déchiffrés avec la session du premier — échec, et le
+  // pair tombait. C'est exactement ce qui arrive dans un groupe, où plusieurs
+  // membres écrivent au même destinataire.
+  final sessions = <String, int>{};
   final deadline = DateTime.now().add(Duration(seconds: seconds));
 
   while (DateTime.now().isBefore(deadline)) {
@@ -76,10 +83,12 @@ Future<void> main(List<String> args) async {
     );
     final list = jsonDecode(res.body) as List;
     for (final m in list) {
+      final expediteur = m['senderDeviceId'] as String;
       final unpacked = Envelope.unpackHeader(base64Decode(m['header'] as String));
-      if (unpacked.handshake != null && sessionId == null) {
-        sessionId = await gateway.acceptSession(unpacked.handshake!);
+      if (unpacked.handshake != null && !sessions.containsKey(expediteur)) {
+        sessions[expediteur] = await gateway.acceptSession(unpacked.handshake!);
       }
+      final sessionId = sessions[expediteur];
       if (sessionId == null) continue;
       final plain = await gateway.decrypt(
         sessionId,

@@ -11,11 +11,14 @@ class Conversation {
     required this.id,
     required this.peerUsername,
     this.peerUserId,
+    this.isGroup = false,
+    Set<String>? memberUserIds,
     Set<String>? targetDeviceIds,
     Map<String, int>? sessions,
     List<ChatMessage>? messages,
     DateTime? lastActivity,
-  })  : targetDeviceIds = targetDeviceIds ?? {},
+  })  : memberUserIds = memberUserIds ?? {},
+        targetDeviceIds = targetDeviceIds ?? {},
         sessions = sessions ?? {},
         messages = messages ?? [],
         lastActivity = lastActivity ?? DateTime.now();
@@ -30,6 +33,19 @@ class Conversation {
   /// Nullable : les conversations enregistrées avant l'ajout de ce champ n'en
   /// ont pas. Il est renseigné à la première réception d'un message.
   String? peerUserId;
+
+  /// Conversation de groupe plutôt que dialogue à deux.
+  ///
+  /// Renseigné à la réception de l'annonce de nom : le destinataire découvre
+  /// le groupe par le canal chiffré, pas par le serveur.
+  bool isGroup;
+
+  /// Membres du groupe, par identifiant de compte.
+  ///
+  /// Le NOM du groupe ne figure pas ici et n'est pas connu du serveur : il
+  /// circule dans les messages chiffrés de bout en bout, au même titre que le
+  /// reste. Le serveur n'a besoin que de la composition, pour router.
+  final Set<String> memberUserIds;
 
   /// Appareils auxquels envoyer : ceux du correspondant, plus les autres
   /// appareils de l'utilisateur lui-même (pour qu'il retrouve ses propres
@@ -53,6 +69,8 @@ class Conversation {
         'id': id,
         'peer': peerUsername,
         if (peerUserId != null) 'peerId': peerUserId,
+        if (isGroup) 'group': true,
+        if (memberUserIds.isNotEmpty) 'members': memberUserIds.toList(),
         'devices': targetDeviceIds.toList(),
         'at': lastActivity.millisecondsSinceEpoch,
       };
@@ -61,6 +79,9 @@ class Conversation {
         id: json['id'] as String,
         peerUsername: json['peer'] as String,
         peerUserId: json['peerId'] as String?,
+        isGroup: json['group'] as bool? ?? false,
+        memberUserIds:
+            ((json['members'] as List?) ?? const []).cast<String>().toSet(),
         targetDeviceIds: ((json['devices'] as List?) ?? const [])
             .cast<String>()
             .toSet(),

@@ -96,6 +96,31 @@ class ApiClient {
     return res.data!['id'] as String;
   }
 
+  /// Crée un groupe. Le serveur ne connaît QUE la composition — nécessaire pour
+  /// router — jamais le nom, qui circule dans les messages chiffrés.
+  Future<String> createGroup(List<String> memberUserIds) async {
+    final res = await _dio.post<Map<String, dynamic>>('/v1/conversations', data: {
+      'type': 'group',
+      'participantIds': memberUserIds,
+    });
+    return res.data!['id'] as String;
+  }
+
+  /// Membres actifs d'une conversation (réservé à ses membres).
+  Future<List<Map<String, dynamic>>> conversationMembers(String id) async {
+    final res = await _dio.get<List<dynamic>>('/v1/conversations/$id/members');
+    return (res.data ?? []).cast<Map<String, dynamic>>();
+  }
+
+  Future<void> addMember(String conversationId, String userId) async {
+    await _dio.post<void>('/v1/conversations/$conversationId/members',
+        data: {'userId': userId});
+  }
+
+  Future<void> removeMember(String conversationId, String userId) async {
+    await _dio.delete<void>('/v1/conversations/$conversationId/members/$userId');
+  }
+
   Future<void> sendMessage({
     required String conversationId,
     required String recipientDeviceId,

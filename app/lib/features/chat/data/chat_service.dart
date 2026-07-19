@@ -494,6 +494,97 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Crée un groupe avec les pseudos donnés et ouvre les sessions.
+  ///
+  /// La diffusion réutilise exactement le mécanisme multi-appareils : un
+  /// message est chiffré séparément pour chaque appareil de chaque membre. Rien
+  /// de nouveau côté cryptographie — c'est ce qui a fait préférer cette
+  /// approche aux Sender Keys, au prix d'un coût linéaire en nombre
+  /// d'appareils. Convient à des groupes de quelques dizaines de membres.
+  ///
+  /// Le nom reste local et voyage dans les messages : le serveur n'a jamais à
+  /// le connaître.
+  Future<void> createGroup({
+    required String name,
+    required List<String> memberUsernames,
+  }) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return;
+    _setBusy(true);
+    try {
+      final memberIds = <String>[];
+      for (final pseudo in memberUsernames) {
+        final user = await api.lookupUser(pseudo.trim());
+        memberIds.add(user['id'] as String);
+      }
+      if (memberIds.isEmpty) {
+        _setBusy(false, err: 'Ajoute au moins un membre.');
+        return;
+      }
+
+      final convId = await api.createGroup(memberIds);
+      final conv = _conversations[convId] ??
+          Conversation(
+            id: convId,
+            peerUsername: name,
+            isGroup: true,
+            memberUserIds: memberIds.toSet(),
+          );
+      conv.peerUsername = name;
+      conv.memberUserIds.addAll(memberIds);
+      _conversations[convId] = conv;
+      activeConversationId = convId;
+
+      await _restoreSessions(conv);
+      for (final memberId in memberIds) {
+        await _openSessionsWith(conv, memberId);
+      }
+      // Les autres appareils de l'utilisateur reçoivent aussi ses messages.
+      if (userId != null) await _openSessionsWith(conv, userId!);
+
+      await _saveConversations();
+      await _saveSessions(conv);
+      _setBusy(false);
+
+      // Le nom du groupe est annoncé DANS le canal chiffré : c'est ainsi que
+      // les autres membres l'apprennent, sans que le serveur le voie passer.
+      await _sendPayload('__zia_groupe__:$name', null);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+    }
+  }
+
+  /// Recharge la composition d'un groupe et ouvre les sessions manquantes.
+  Future<void> refreshGroupMembers() async {
+    final conv = active;
+    final api = _api;
+    if (conv == null || api == null || !conv.isGroup) return;
+    try {
+      final membres = await api.conversationMembers(conv.id);
+      conv.memberUserIds
+        ..clear()
+        ..addAll(membres.map((m) => m['userId'] as String));
+      for (final memberId in conv.memberUserIds) {
+        await _openSessionsWith(conv, memberId);
+      }
+      await _saveConversations();
+      await _saveSessions(conv);
+      notifyListeners();
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+    }
+  }
+
+  /// Préfixe des annonces internes échangées dans le canal chiffré.
+  ///
+  /// Elles servent à transmettre ce que le serveur ne doit pas connaître — à
+  /// commencer par le nom d'un groupe — et ne s'affichent jamais.
+  static const _prefixeAnnonce = '__zia_groupe__:';
+
+  static bool _estAnnonceInterne(String texte) =>
+      texte.startsWith(_prefixeAnnonce);
+
   Future<void> send(String text) => _sendPayload(text, null);
 
   /// Chiffre et diffuse un contenu vers tous les appareils de la conversation.
@@ -534,12 +625,18 @@ class ChatService extends ChangeNotifier {
         return;
       }
 
-      conv.messages.add(ChatMessage(
-        text: text,
-        mine: true,
-        at: DateTime.now(),
-        attachment: attachment,
-      ));
+      // Les annonces internes (nom de groupe) ne sont pas des messages : elles
+      // ne s'affichent ni chez l'expéditeur, ni chez les destinataires. Seule
+      // la réception les filtrait, si bien que l'auteur du groupe voyait passer
+      // un marqueur technique dans sa propre conversation.
+      if (!_estAnnonceInterne(text)) {
+        conv.messages.add(ChatMessage(
+          text: text,
+          mine: true,
+          at: DateTime.now(),
+          attachment: attachment,
+        ));
+      }
       conv.lastActivity = DateTime.now();
       notifyListeners();
 
@@ -752,6 +849,15 @@ class ChatService extends ChangeNotifier {
         // j'ai écrit : il s'affiche comme tel plutôt que comme reçu.
         final fromMyself = (m['senderUsername'] as String?) == username;
         final payload = _decodePayload(plain);
+
+        // Annonce du nom d'un groupe : elle sert à nommer la conversation, pas
+        // à s'afficher comme un message. Le serveur n'a jamais vu ce nom.
+        if (_estAnnonceInterne(payload.text)) {
+          conv.peerUsername = payload.text.substring(_prefixeAnnonce.length);
+          conv.isGroup = true;
+          touched.add(conv);
+          continue;
+        }
         conv.messages.add(ChatMessage(
           text: payload.text,
           mine: fromMyself,

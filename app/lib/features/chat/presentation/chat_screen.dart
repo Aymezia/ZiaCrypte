@@ -185,6 +185,70 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Création d'un groupe : un nom, et des pseudos séparés par des virgules.
+  Future<void> _promptNewGroup() async {
+    final nom = TextEditingController();
+    final membres = TextEditingController();
+    final cree = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Nouveau groupe'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nom,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Nom du groupe',
+                prefixIcon: Icon(Icons.groups_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: membres,
+              decoration: const InputDecoration(
+                labelText: 'Pseudos, séparés par des virgules',
+                prefixIcon: Icon(Icons.person_add_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Le nom du groupe ne quitte pas le canal chiffré : le serveur ne '
+              'connaît que la liste des membres, dont il a besoin pour '
+              'acheminer les messages.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Créer'),
+          ),
+        ],
+      ),
+    );
+    if (cree != true) return;
+
+    final liste = membres.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (liste.isEmpty || nom.text.trim().isEmpty) return;
+    await widget.service.createGroup(
+      name: nom.text.trim(),
+      memberUsernames: liste,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -262,6 +326,11 @@ class _ChatScreenState extends State<ChatScreen> {
               icon: const Icon(Icons.edit_square),
             ),
             IconButton(
+              tooltip: 'Nouveau groupe',
+              onPressed: s.busy ? null : _promptNewGroup,
+              icon: const Icon(Icons.group_add_outlined),
+            ),
+            IconButton(
               tooltip: 'Se déconnecter',
               onPressed: () => s.logout(),
               icon: const Icon(Icons.logout_rounded),
@@ -291,11 +360,19 @@ class _ChatScreenState extends State<ChatScreen> {
                       selectedTileColor: theme.colorScheme.surfaceContainerHighest,
                       leading: CircleAvatar(
                         backgroundColor: theme.colorScheme.primaryContainer,
-                        child: Text(
-                          c.peerUsername.characters.first.toUpperCase(),
-                          style: TextStyle(
-                              color: theme.colorScheme.onPrimaryContainer),
-                        ),
+                        // Un groupe se reconnaît d'un coup d'œil : une
+                        // initiale seule ne dit pas à combien de personnes on
+                        // s'apprête à écrire.
+                        child: c.isGroup
+                            ? Icon(Icons.groups_rounded,
+                                size: 20,
+                                color: theme.colorScheme.onPrimaryContainer)
+                            : Text(
+                                c.peerUsername.characters.first.toUpperCase(),
+                                style: TextStyle(
+                                    color:
+                                        theme.colorScheme.onPrimaryContainer),
+                              ),
                       ),
                       title: Text(c.peerUsername,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
