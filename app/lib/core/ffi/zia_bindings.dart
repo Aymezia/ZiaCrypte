@@ -175,6 +175,11 @@ class ZiaBindings {
                 Pointer<Pointer<Uint8>>, Pointer<Size>),
             int Function(Pointer<Uint8>, Pointer<Uint8>, int,
                 Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_attachment_decrypt'),
+        safetyNumber = lib.lookupFunction<
+            Int32 Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,
+                Pointer<Char>, Pointer<Char>),
+            int Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,
+                Pointer<Char>, Pointer<Char>)>('zia_safety_number'),
         secureWrite = lib.lookupFunction<
             Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, Size),
             int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>,
@@ -221,6 +226,10 @@ class ZiaBindings {
       Pointer<Pointer<Uint8>>, Pointer<Size>) attachmentEncrypt;
   final int Function(Pointer<Uint8>, Pointer<Uint8>, int,
       Pointer<Pointer<Uint8>>, Pointer<Size>) attachmentDecrypt;
+
+  /// Empreinte des deux clés d'identité (60 chiffres + octet nul).
+  final int Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,
+      Pointer<Char>, Pointer<Char>) safetyNumber;
 
   final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int)
       secureWrite;

@@ -97,6 +97,10 @@ export async function messagesRoutes(app: FastifyInstance) {
       conversationId: m.conversationId,
       senderDeviceId: m.senderDeviceId,
       senderUsername: m.sender.user.username,
+      // Identifiant de compte de l'expéditeur : sert d'ancrage stable pour
+      // l'épinglage des clés d'identité côté client. Le pseudo ne convient pas,
+      // il peut être réattribué après suppression d'un compte.
+      senderUserId: m.sender.userId,
       clientMessageId: m.clientMessageId,
       header: b64(m.ratchetHeader),
       ciphertext: b64(m.ciphertext),

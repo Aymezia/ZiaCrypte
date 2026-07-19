@@ -12,7 +12,9 @@ import '../../../core/ffi/zia_crypto_exceptions.dart';
 import '../../../core/network/api_client.dart';
 import '../domain/chat_message.dart';
 import '../domain/conversation.dart';
+import '../domain/contact_identity.dart';
 import '../domain/crypto_models.dart';
+import 'identity_pinning.dart';
 import 'envelope.dart';
 import 'ffi_crypto_gateway.dart';
 
@@ -24,6 +26,15 @@ export '../domain/conversation.dart';
 class ChatService extends ChangeNotifier {
   ApiClient? _api;
   FfiCryptoGateway? _gateway;
+  IdentityPinning? _pinning;
+
+  /// Registre des clés d'identité épinglées. Null tant qu'aucune session n'est
+  /// ouverte.
+  IdentityPinning? get pinning => _pinning;
+
+  /// Changements de clé détectés et non encore tranchés par l'utilisateur,
+  /// indexés par identifiant d'appareil.
+  final Map<String, IdentityChangedException> identityAlerts = {};
   Timer? _poll;
   WebSocket? _socket;
   bool realtime = false;
@@ -202,6 +213,10 @@ class ChatService extends ChangeNotifier {
     userId = res['userId'] as String;
     deviceId = res['deviceId'] as String;
 
+    final pinning = IdentityPinning(gateway.engine);
+    await pinning.load();
+    _pinning = pinning;
+
     await _loadConversations();
     _startPolling();
     unawaited(_replenishPrekeys());
@@ -215,6 +230,8 @@ class ChatService extends ChangeNotifier {
     realtime = false;
     await _gateway?.dispose();
     _gateway = null;
+    _pinning = null;
+    identityAlerts.clear();
     _api = null;
     userId = null;
     deviceId = null;
@@ -382,8 +399,28 @@ class ChatService extends ChangeNotifier {
       conv.targetDeviceIds.add(device);
       if (conv.sessions.containsKey(device)) continue;
 
+      final theirIdentity = base64Decode(bundleJson['identityKey'] as String);
+
+      // Contrôle avant toute ouverture de session : c'est le seul instant où
+      // une substitution de clé par le serveur est détectable. Si la clé a
+      // changé, on n'ouvre PAS la session — on remonte l'alerte et on laisse
+      // l'utilisateur trancher après comparaison du numéro de sécurité.
+      // Poursuivre en silence viderait la vérification de tout sens.
+      try {
+        await _pinning?.checkAndPin(
+          deviceId: device,
+          userId: targetUserId,
+          identityKey: theirIdentity,
+        );
+      } on IdentityChangedException catch (alert) {
+        identityAlerts[device] = alert;
+        conv.targetDeviceIds.remove(device);
+        notifyListeners();
+        continue;
+      }
+
       final theirBundle = PrekeyBundle(
-        identityKey: base64Decode(bundleJson['identityKey'] as String),
+        identityKey: theirIdentity,
         signedPrekey: base64Decode(bundleJson['signedPrekey'] as String),
         signedPrekeySignature:
             base64Decode(bundleJson['signedPrekeySignature'] as String),
@@ -621,6 +658,24 @@ class ChatService extends ChangeNotifier {
         // Chaque appareil expéditeur a sa propre session : la première
         // réception depuis un appareil nous en fait le répondeur.
         if (unpacked.handshake != null && !conv.sessions.containsKey(sender)) {
+          // Second point d'entrée d'une clé d'identité — celui-ci vient du
+          // handshake, pas d'un bundle. Sans le même contrôle qu'à l'émission,
+          // il suffirait au serveur de nous faire recevoir en premier pour
+          // contourner l'épinglage.
+          final senderUserId = m['senderUserId'] as String?;
+          if (senderUserId != null) {
+            try {
+              await _pinning?.checkAndPin(
+                deviceId: sender,
+                userId: senderUserId,
+                identityKey: unpacked.handshake!.initiatorIdentityKey,
+              );
+            } on IdentityChangedException catch (alert) {
+              identityAlerts[sender] = alert;
+              notifyListeners();
+              continue; // message non déchiffré tant que ce n'est pas tranché
+            }
+          }
           conv.sessions[sender] = await gateway.acceptSession(unpacked.handshake!);
           conv.targetDeviceIds.add(sender);
         }

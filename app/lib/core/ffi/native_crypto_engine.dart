@@ -318,6 +318,38 @@ class NativeCryptoEngine {
     }
   }
 
+  // ---- Vérification de contact ----
+
+  /// Empreinte à 60 chiffres des deux clés d'identité.
+  ///
+  /// Calculée par le moteur natif, jamais en Dart. Le résultat est symétrique :
+  /// les deux correspondants obtiennent la même chaîne et peuvent la comparer
+  /// hors bande, par un canal que le serveur ne contrôle pas.
+  String safetyNumber({
+    required Uint8List localKey,
+    required String localId,
+    required Uint8List remoteKey,
+    required String remoteId,
+  }) {
+    final localPtr = _toNative(localKey);
+    final remotePtr = _toNative(remoteKey);
+    final localIdPtr = localId.toNativeUtf8();
+    final remoteIdPtr = remoteId.toNativeUtf8();
+    // 60 chiffres + l'octet nul terminal.
+    final out = calloc<Uint8>(61);
+    try {
+      _check(_b.safetyNumber(localPtr, localIdPtr.cast<Char>(), remotePtr,
+          remoteIdPtr.cast<Char>(), out.cast<Char>()));
+      return out.cast<Utf8>().toDartString();
+    } finally {
+      calloc.free(localPtr);
+      calloc.free(remotePtr);
+      malloc.free(localIdPtr);
+      malloc.free(remoteIdPtr);
+      calloc.free(out);
+    }
+  }
+
   // ---- Coffre local chiffré ----
 
   /// Range [data] chiffré sous la clé maîtresse de l'appareil.

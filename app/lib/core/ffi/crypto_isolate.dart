@@ -81,6 +81,20 @@ class ZiaCryptoEngine {
   Future<Uint8List> attachmentDecrypt(Uint8List key, Uint8List ciphertext) =>
       _call('attachmentDecrypt', {'key': key, 'ct': ciphertext});
 
+  /// Empreinte à 60 chiffres des deux clés d'identité, à comparer hors bande.
+  Future<String> safetyNumber({
+    required Uint8List localKey,
+    required String localId,
+    required Uint8List remoteKey,
+    required String remoteId,
+  }) =>
+      _call('safetyNumber', {
+        'lk': localKey,
+        'li': localId,
+        'rk': remoteKey,
+        'ri': remoteId,
+      });
+
   /// Range une donnée chiffrée dans le coffre local de l'appareil.
   Future<void> vaultWrite(String name, Uint8List data) =>
       _call('vaultWrite', {'name': name, 'data': data});
@@ -203,6 +217,13 @@ class ZiaCryptoEngine {
       case 'attachmentDecrypt':
         return engine.attachmentDecrypt(
             a['key'] as Uint8List, a['ct'] as Uint8List);
+      case 'safetyNumber':
+        return engine.safetyNumber(
+          localKey: a['lk'] as Uint8List,
+          localId: a['li'] as String,
+          remoteKey: a['rk'] as Uint8List,
+          remoteId: a['ri'] as String,
+        );
       case 'vaultWrite':
         engine.vaultWrite(a['name'] as String, a['data'] as Uint8List);
         return null;

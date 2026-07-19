@@ -14,6 +14,10 @@ class FfiCryptoGateway implements CryptoGateway {
 
   final ZiaCryptoEngine _engine;
 
+  /// Moteur sous-jacent, pour les composants qui en dépendent directement
+  /// (épinglage des identités, numéros de sécurité).
+  ZiaCryptoEngine get engine => _engine;
+
   /// Ouvre le moteur natif (démarre l'isolate) et renvoie le gateway prêt.
   static Future<FfiCryptoGateway> open(String storagePath,
       {String? libraryPath}) async {
