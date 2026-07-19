@@ -9,6 +9,7 @@ add_library(zia_crypto SHARED
     storage/secure_blob.cpp
     vault.cpp
     attachment.cpp
+    safety_number.cpp
 )
 
 target_include_directories(zia_crypto

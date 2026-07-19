@@ -18,6 +18,7 @@ extern "C" {
 #define ZIA_PUBLIC_KEY_LEN   32   /* X25519 / Ed25519 */
 #define ZIA_SIGNATURE_LEN    64   /* Ed25519 */
 #define ZIA_ATTACHMENT_KEY_LEN 32 /* clé de pièce jointe (XChaCha20-Poly1305) */
+#define ZIA_SAFETY_NUMBER_DIGITS 60 /* 2 x 30 chiffres, format Signal */
 
 /* ---- Handles opaques ---- */
 typedef struct ZiaEngine  ZiaEngine;
@@ -110,6 +111,21 @@ ZIA_API ZiaStatus zia_session_decrypt(ZiaSession* session,
 ZIA_API ZiaStatus zia_attachment_encrypt(const uint8_t* plaintext, size_t plaintext_len,
                                          uint8_t out_key[ZIA_ATTACHMENT_KEY_LEN],
                                          uint8_t** out_ciphertext, size_t* out_len);
+/* ---- Vérification de contact ----
+ *
+ * Empreinte des deux clés d'identité, à comparer hors bande (de vive voix, QR).
+ * C'est la seule protection contre un serveur qui substituerait ses propres
+ * clés : le chiffrement seul n'y peut rien, l'attaque portant sur
+ * l'authenticité des clés et non sur leur confidentialité.
+ *
+ * Le résultat est symétrique : les deux correspondants lisent le même nombre.
+ * `out` reçoit 60 chiffres suivis d'un octet nul. */
+ZIA_API ZiaStatus zia_safety_number(const uint8_t local_pub[ZIA_PUBLIC_KEY_LEN],
+                                    const char* local_id,
+                                    const uint8_t remote_pub[ZIA_PUBLIC_KEY_LEN],
+                                    const char* remote_id,
+                                    char out[ZIA_SAFETY_NUMBER_DIGITS + 1]);
+
 ZIA_API ZiaStatus zia_attachment_decrypt(const uint8_t key[ZIA_ATTACHMENT_KEY_LEN],
                                          const uint8_t* ciphertext, size_t ciphertext_len,
                                          uint8_t** out_plaintext, size_t* out_len);
