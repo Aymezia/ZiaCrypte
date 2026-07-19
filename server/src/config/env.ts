@@ -16,6 +16,14 @@ const schema = z.object({
   HOST: z.string().default('127.0.0.1'),
   ACCESS_TOKEN_TTL: z.string().default('15m'),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().default(30),
+
+  // Stockage objet des pièces jointes (API S3 : MinIO auto-hébergé ici, mais
+  // Cloudflare R2 ou Backblaze B2 conviennent en changeant l'endpoint).
+  S3_ENDPOINT: z.string().url(),
+  S3_REGION: z.string().default('us-east-1'),
+  S3_BUCKET: z.string().default('ziacrypte-attachments'),
+  S3_ACCESS_KEY: z.string().min(3),
+  S3_SECRET_KEY: z.string().min(8),
 });
 
 export const env = schema.parse(process.env);

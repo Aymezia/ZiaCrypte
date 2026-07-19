@@ -275,6 +275,49 @@ class NativeCryptoEngine {
     }
   }
 
+  // ---- Pièces jointes ----
+
+  /// Chiffre un fichier sous une clé tirée au hasard, renvoyée avec le
+  /// ciphertext. La clé voyagera dans le message chiffré ; l'hébergeur du
+  /// stockage ne reçoit que le ciphertext.
+  ({Uint8List key, Uint8List ciphertext}) attachmentEncrypt(Uint8List data) {
+    final input = _toNative(data);
+    final key = calloc<Uint8>(ziaAttachmentKeyLen);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.attachmentEncrypt(input, data.length, key, outPtr, outLen));
+      return (
+        key: _copyOut(key, ziaAttachmentKeyLen),
+        ciphertext: _copyAndFree(outPtr.value, outLen.value),
+      );
+    } finally {
+      calloc.free(input);
+      calloc.free(key);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
+  /// Déchiffre une pièce jointe. Échoue si la clé est fausse ou le fichier
+  /// altéré (l'authentification AEAD le détecte).
+  Uint8List attachmentDecrypt(Uint8List key, Uint8List ciphertext) {
+    final keyPtr = _toNative(key);
+    final input = _toNative(ciphertext);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.attachmentDecrypt(
+          keyPtr, input, ciphertext.length, outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(keyPtr);
+      calloc.free(input);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
   // ---- Coffre local chiffré ----
 
   /// Range [data] chiffré sous la clé maîtresse de l'appareil.

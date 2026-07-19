@@ -8,6 +8,7 @@ add_library(zia_crypto SHARED
     storage/identity_store.cpp
     storage/secure_blob.cpp
     vault.cpp
+    attachment.cpp
 )
 
 target_include_directories(zia_crypto

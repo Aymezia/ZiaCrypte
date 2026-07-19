@@ -10,6 +10,7 @@ import 'dart:ffi';
 // ---- Tailles fixes (miroir des #define du header) ----
 const int ziaPublicKeyLen = 32;
 const int ziaSignatureLen = 64;
+const int ziaAttachmentKeyLen = 32;
 
 // ---- Codes de statut (miroir de l'enum ZiaStatus) ----
 abstract final class ZiaStatus {
@@ -164,6 +165,16 @@ class ZiaBindings {
                 Pointer<Pointer<ZiaSession>>),
             int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
                 Pointer<Pointer<ZiaSession>>)>('zia_session_deserialize'),
+        attachmentEncrypt = lib.lookupFunction<
+            Int32 Function(Pointer<Uint8>, Size, Pointer<Uint8>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<Uint8>, int, Pointer<Uint8>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_attachment_encrypt'),
+        attachmentDecrypt = lib.lookupFunction<
+            Int32 Function(Pointer<Uint8>, Pointer<Uint8>, Size,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_attachment_decrypt'),
         secureWrite = lib.lookupFunction<
             Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, Size),
             int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>,
@@ -205,6 +216,11 @@ class ZiaBindings {
       sessionSerialize;
   final int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
       Pointer<Pointer<ZiaSession>>) sessionDeserialize;
+
+  final int Function(Pointer<Uint8>, int, Pointer<Uint8>,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) attachmentEncrypt;
+  final int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) attachmentDecrypt;
 
   final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int)
       secureWrite;

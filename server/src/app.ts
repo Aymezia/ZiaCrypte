@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { HttpError } from './lib/errors.js';
+import { attachmentsRoutes } from './modules/attachments/attachments.routes.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js';
 import { devicesRoutes } from './modules/devices/devices.routes.js';
@@ -30,6 +31,7 @@ export function buildApp(): FastifyInstance {
       await conversationsRoutes(v1);
       await messagesRoutes(v1);
       await usersRoutes(v1);
+      await attachmentsRoutes(v1);
     },
     { prefix: '/v1' },
   );

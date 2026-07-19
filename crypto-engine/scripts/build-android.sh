@@ -70,7 +70,7 @@ for abi in "${ABIS[@]}"; do
     "$ROOT/src/ratchet.cpp" "$ROOT/src/session.cpp" \
     "$ROOT/src/primitives/primitives.cpp" \
     "$ROOT/src/storage/identity_store.cpp" "$ROOT/src/storage/secure_blob.cpp" \
-    "$ROOT/src/vault.cpp" \
+    "$ROOT/src/vault.cpp" "$ROOT/src/attachment.cpp" \
     "$ROOT/platform/android/secure_key_store_android.cpp" \
     -o "$out_dir/libzia_crypto.so" \
     "$sodium_prefix/lib/libsodium.a" -llog

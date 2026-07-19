@@ -17,6 +17,7 @@ extern "C" {
 /* ---- Tailles fixes (octets) ---- */
 #define ZIA_PUBLIC_KEY_LEN   32   /* X25519 / Ed25519 */
 #define ZIA_SIGNATURE_LEN    64   /* Ed25519 */
+#define ZIA_ATTACHMENT_KEY_LEN 32 /* clé de pièce jointe (XChaCha20-Poly1305) */
 
 /* ---- Handles opaques ---- */
 typedef struct ZiaEngine  ZiaEngine;
@@ -100,6 +101,18 @@ ZIA_API ZiaStatus zia_session_decrypt(ZiaSession* session,
                                       const uint8_t* header, size_t header_len,
                                       const uint8_t* ciphertext, size_t ciphertext_len,
                                       uint8_t** out_plaintext, size_t* out_plaintext_len);
+
+/* ================= Pièces jointes ================= */
+/* Chiffre un fichier sous une clé tirée au hasard, renvoyée à l'appelant. Le
+ * ciphertext est destiné à un hébergeur de stockage ; la clé, elle, voyage
+ * dans le message chiffré de bout en bout — l'hébergeur ne peut donc rien lire.
+ * Les tampons de sortie sont à libérer avec zia_free_buffer. */
+ZIA_API ZiaStatus zia_attachment_encrypt(const uint8_t* plaintext, size_t plaintext_len,
+                                         uint8_t out_key[ZIA_ATTACHMENT_KEY_LEN],
+                                         uint8_t** out_ciphertext, size_t* out_len);
+ZIA_API ZiaStatus zia_attachment_decrypt(const uint8_t key[ZIA_ATTACHMENT_KEY_LEN],
+                                         const uint8_t* ciphertext, size_t ciphertext_len,
+                                         uint8_t** out_plaintext, size_t* out_len);
 
 /* ================= Coffre local chiffré ================= */
 /* Range des données arbitraires chiffrées sous la clé maîtresse de l'appareil.
