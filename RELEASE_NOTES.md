@@ -1,44 +1,55 @@
-# ZiaCrypte v0.4.0 — your account survives a restart
+# ZiaCrypte v0.5.0 — history, real-time delivery, and Android
 
-Until now the application generated fresh keys at every launch, which meant a brand-new account each time. That is fixed: your device identity is stored encrypted, and the app reconnects to your account with just your password.
+Three things this release makes usable: your conversations survive a restart, messages arrive instantly instead of on a timer, and there is now an Android build.
 
 ## Downloads
 
 | Asset | Platform |
 |---|---|
+| **`ziacrypte-android.apk`** | Android (arm64, arm32, x86_64) — enable "install from unknown sources" |
 | **`ziacrypte-windows-x64-app.zip`** | Windows x64 — unzip, run `ziacrypte.exe` |
 | **`ziacrypte-linux-x64.tar.gz`** | Linux x64 — `tar xzf … && cd linux-x64 && ./ziacrypte` |
 | **`ziacrypte-macos-app.zip`** | macOS — unzip, right-click `ziacrypte.app` → Open (unsigned) |
 | `zia_crypto_test.exe` | Standalone Windows verifier for the crypto engine |
 
-Nothing to configure: the server address is built in, and libsodium is linked statically.
+Nothing to configure: the server address is built in and the relay runs over HTTPS.
 
-## What changed
+## Conversation history, encrypted locally
 
-**Identity persistence.** The engine now writes its identity — Ed25519 identity key, signed prekey, one-time prekeys — to `identity.zia`, encrypted with `crypto_secretstream_xchacha20poly1305` under a master key held by the operating system key store (Secret Service on Linux, DPAPI on Windows, Keychain on macOS). It reloads that identity on startup.
+The engine gained a general-purpose local vault: arbitrary data encrypted with `crypto_secretstream_xchacha20poly1305` under the device master key held by the OS key store. Writes are atomic and entry names are validated, so a caller cannot escape the vault directory.
 
-Writes are atomic (temporary file then rename), and reads are bounds-checked so a corrupted file fails cleanly instead of being trusted.
+The application keeps each conversation's history there. Two backend fixes were needed to make it work for both correspondents: a direct conversation between two people is now unique (its identifier changed on every open before, orphaning the stored history), and received messages carry the sender's username so the recipient knows who is writing.
 
-**Reconnection.** The application remembers which account belongs to this device (username and identifiers — no secrets) and asks only for your password on the next launch. "Use a different account" is available if you want to start over.
+## Real-time delivery
 
-**Degraded, not broken.** If no key store is available (headless session, container, test), the identity still works for the current session; it simply will not be reloaded next time. The failure is recorded in `zia_last_error()`. Refusing to run at all would have made the engine unusable in those environments.
+A WebSocket gateway notifies a device that a blob is waiting; the client then fetches it immediately. **The WebSocket carries no content** — only a signal — and delivery never depends on it: the periodic fetch remains as a safety net (now every 15 s), with automatic reconnection. Authentication happens at the handshake, and nginx relays the upgrade over TLS.
+
+## Android
+
+The engine is cross-compiled with the NDK for three ABIs with libsodium linked statically. Since the Android Keystore has no C API, the native backend reaches `com.ziacrypte.KeyStoreBridge` through JNI: a non-exportable AES key in the hardware Keystore wraps the 32-byte master key.
+
+Two traps were found and fixed along the way:
+
+- `FindClass` from a secondary thread cannot see application classes (wrong class loader). The class is now cached as a global reference in `JNI_OnLoad`.
+- **R8 was renaming that class**, which would have made the native lookup fail silently at runtime — persistence would have broken with no error. This was caught by inspecting the DEX of the first APK, where every class had been obfuscated. Keep rules now preserve it, confirmed in the final DEX.
 
 ## Verified by actually running it
 
-- New C++ persistence test: identity survives an engine restart, the signed prekey and its signature stay valid, regeneration is refused, and a different storage path yields a different identity
-- Engine conformance and persistence suites: **2/2**
+- Engine suites (conformance + persistence, including vault checks): **2/2**
 - Flutter suite (widget + FFI against the real engine): **5/5**
-- **End-to-end on the real application**: an account was created through the interface, the application was closed, relaunched, and reconnected with only a password. The database confirms **two sessions for a single device** — the identity was reused, no account was recreated
-- `identity.zia` was inspected on disk: opaque ciphertext, no key in the clear
+- Backend integration suite against a real PostgreSQL: **1/1**
+- **History**: two messages sent from the interface, application closed, relaunched, history restored — and the vault file on disk contains no readable text
+- **Real-time**: an auto-replying peer answered and the reply appeared in the application in under 2.5 s, well before the 15 s periodic fetch
+- **Android APK**: contents verified — native libraries for all three ABIs, INTERNET permission, and the JNI bridge with its five methods intact after R8
 
 ## Known limitations
 
-- The **Windows** and **macOS** applications are built by CI and their packages verified, but never launched — no such machine was available. Only Linux was exercised end to end.
-- Real-time delivery uses polling every 2 seconds; a WebSocket gateway is planned.
-- Windows and macOS builds are unsigned, so both systems warn on first launch.
-- iOS and Android are scaffolded but not published. iOS requires an Apple Developer account for signing and installation.
-- Message history is not stored locally yet: only the identity and account are persisted.
+- The **Android, Windows and macOS** applications are built and their packages verified, but **never launched** — no such device was available here. Only Linux was exercised end to end.
+- The APK is signed with a debug key; Android will warn on install.
+- Windows and macOS builds are unsigned.
+- Message history is kept per device: a new device starts with an empty history.
+- iOS is scaffolded but not published; it requires an Apple Developer account for signing and installation.
 
 ## Security
 
-Every cryptographic primitive comes from [libsodium](https://libsodium.org). Only the X3DH and Double Ratchet protocol logic is implemented here, following the published Signal specifications. Private keys never touch the disk unencrypted, and the server never holds one. The relay is reachable over HTTPS with a Let's Encrypt certificate.
+Every cryptographic primitive comes from [libsodium](https://libsodium.org). Only the X3DH and Double Ratchet protocol logic is implemented here, following the published Signal specifications. Private keys and conversation history never touch the disk unencrypted, and the server never holds a key nor sees a plaintext.
