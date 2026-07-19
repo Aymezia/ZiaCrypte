@@ -29,6 +29,14 @@ const schema = z.object({
   // démarre avec un fournisseur inerte et le signale au démarrage. La remise
   // des messages n'en dépend pas — seule la latence hors ligne se dégrade.
   FCM_SERVICE_ACCOUNT_FILE: z.string().optional(),
+
+  // Limitation de débit. Réglable pour que les tests puissent éprouver le
+  // mécanisme sans que les autres suites se bloquent elles-mêmes.
+  RATE_LIMIT_GLOBAL_MAX: z.coerce.number().default(300),
+  RATE_LIMIT_PASSWORD_MAX: z.coerce.number().default(10),
+  RATE_LIMIT_PASSWORD_WINDOW: z.string().default('5 minutes'),
+  RATE_LIMIT_REGISTER_MAX: z.coerce.number().default(5),
+  RATE_LIMIT_REGISTER_WINDOW: z.string().default('1 hour'),
 });
 
 export const env = schema.parse(process.env);

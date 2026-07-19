@@ -6,6 +6,7 @@ import { HttpError } from '../../lib/errors.js';
 import { hashToken, verifyRefresh } from '../../lib/tokens.js';
 import { createDevice, deviceRegistrationSchema } from '../devices/device.schema.js';
 import { createSession } from './auth.service.js';
+import { passwordRateLimit, registrationRateLimit } from '../../plugins/rate-limit.js';
 
 /* Hash factice : on vérifie toujours un mot de passe, même si le compte
    n'existe pas, pour ne pas révéler son existence par le temps de réponse. */
@@ -35,7 +36,7 @@ const refreshSchema = z.object({
 });
 
 export async function authRoutes(app: FastifyInstance) {
-  app.post('/auth/register', async (request, reply) => {
+  app.post('/auth/register', { config: registrationRateLimit() }, async (request, reply) => {
     const body = registerSchema.parse(request.body);
 
     const existing = await prisma.user.findUnique({ where: { username: body.username } });
@@ -54,7 +55,7 @@ export async function authRoutes(app: FastifyInstance) {
     return reply.code(201).send({ userId: device.userId, deviceId: device.id, ...tokens });
   });
 
-  app.post('/auth/login', async (request, reply) => {
+  app.post('/auth/login', { config: passwordRateLimit() }, async (request, reply) => {
     const body = loginSchema.parse(request.body);
 
     const user = await prisma.user.findUnique({ where: { username: body.username } });
@@ -81,7 +82,7 @@ export async function authRoutes(app: FastifyInstance) {
   // Rattache un NOUVEL appareil à un compte existant : c'est ce qui permet
   // d'utiliser le même compte sur plusieurs machines. L'appareil génère sa
   // propre identité — aucune clé privée ne circule entre appareils.
-  app.post('/auth/add-device', async (request, reply) => {
+  app.post('/auth/add-device', { config: passwordRateLimit() }, async (request, reply) => {
     const body = addDeviceSchema.parse(request.body);
 
     const user = await prisma.user.findUnique({ where: { username: body.username } });

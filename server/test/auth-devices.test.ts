@@ -17,7 +17,7 @@ const USERNAMES = ['alice_test', 'bob_test'];
 let app: FastifyInstance;
 
 beforeAll(async () => {
-  app = buildApp();
+  app = await buildApp();
   await app.ready();
   await prisma.user.deleteMany({ where: { username: { in: USERNAMES } } });
 });

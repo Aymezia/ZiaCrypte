@@ -5,7 +5,7 @@ import { buildPushProviders } from './modules/push/push.bootstrap.js';
 import { initPush } from './modules/push/push.service.js';
 import { initGateway } from './ws/gateway.js';
 
-const app = buildApp();
+const app = await buildApp();
 
 app.ready().then(() => {
   initGateway(app.server);

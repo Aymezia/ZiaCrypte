@@ -18,7 +18,7 @@ let app: FastifyInstance;
 let counter = 0;
 
 beforeAll(async () => {
-  app = buildApp();
+  app = await buildApp();
   await app.ready();
 });
 

@@ -33,7 +33,7 @@ async function register(label: string) {
 }
 
 beforeAll(async () => {
-  app = buildApp();
+  app = await buildApp();
   await app.ready();
 });
 
