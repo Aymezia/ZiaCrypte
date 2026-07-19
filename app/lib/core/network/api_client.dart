@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 /// Client REST du serveur ZiaCrypte.
@@ -129,6 +131,42 @@ class ApiClient {
       if (signedPrekeySignature != null)
         'signedPrekeySignature': signedPrekeySignature,
     });
+  }
+
+  /// Réserve une pièce jointe et obtient l'URL de dépôt (pré-signée).
+  Future<Map<String, dynamic>> createAttachment({
+    required String conversationId,
+    required int ciphertextSize,
+    required String encryptedMetadataB64,
+  }) async {
+    final res = await _dio.post<Map<String, dynamic>>('/v1/attachments', data: {
+      'conversationId': conversationId,
+      'ciphertextSize': ciphertextSize,
+      'encryptedMetadata': encryptedMetadataB64,
+    });
+    return res.data!;
+  }
+
+  /// URL de téléchargement d'une pièce jointe.
+  Future<Map<String, dynamic>> attachment(String id) async {
+    final res = await _dio.get<Map<String, dynamic>>('/v1/attachments/$id');
+    return res.data!;
+  }
+
+  /// Dépose ou récupère le contenu chiffré directement sur le stockage objet,
+  /// sans passer par l'API (URL pré-signée, aucun jeton envoyé à l'hébergeur).
+  Future<void> uploadToStorage(String url, Uint8List ciphertext) async {
+    await Dio().put<void>(url,
+        data: Stream.fromIterable([ciphertext]),
+        options: Options(headers: {
+          Headers.contentLengthHeader: ciphertext.length,
+        }));
+  }
+
+  Future<Uint8List> downloadFromStorage(String url) async {
+    final res = await Dio().get<List<int>>(url,
+        options: Options(responseType: ResponseType.bytes));
+    return Uint8List.fromList(res.data ?? const []);
   }
 
   /// Relève les blobs chiffrés en attente pour l'appareil courant.

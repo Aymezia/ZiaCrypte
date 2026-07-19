@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/config/app_config.dart';
@@ -396,14 +397,17 @@ class ChatService extends ChangeNotifier {
     }
   }
 
-  Future<void> send(String text) async {
+  Future<void> send(String text) => _sendPayload(text, null);
+
+  /// Chiffre et diffuse un contenu vers tous les appareils de la conversation.
+  Future<void> _sendPayload(String text, AttachmentRef? attachment) async {
     final conv = active;
     final api = _api;
     final gateway = _gateway;
     if (conv == null || api == null || gateway == null || !conv.ready) return;
 
     try {
-      final clearText = Uint8List.fromList(utf8.encode(text));
+      final clearText = _encodePayload(text, attachment);
       var delivered = 0;
 
       // Chaque appareil a sa propre session : le message est chiffré autant de
@@ -433,7 +437,12 @@ class ChatService extends ChangeNotifier {
         return;
       }
 
-      conv.messages.add(ChatMessage(text: text, mine: true, at: DateTime.now()));
+      conv.messages.add(ChatMessage(
+        text: text,
+        mine: true,
+        at: DateTime.now(),
+        attachment: attachment,
+      ));
       conv.lastActivity = DateTime.now();
       notifyListeners();
 
@@ -443,6 +452,105 @@ class ChatService extends ChangeNotifier {
     } catch (e) {
       error = _humanize(e);
       notifyListeners();
+    }
+  }
+
+  // ------------------------------------------------------------ pièces jointes
+
+  /// Contenu d'un message : JSON pour pouvoir porter une pièce jointe.
+  Uint8List _encodePayload(String text, AttachmentRef? attachment) {
+    return Uint8List.fromList(utf8.encode(jsonEncode({
+      't': text,
+      if (attachment != null) 'f': attachment.toJson(),
+    })));
+  }
+
+  /// Décode un contenu. Un message qui n'est pas du JSON est du texte brut :
+  /// on le rend tel quel plutôt que d'afficher une erreur.
+  ({String text, AttachmentRef? attachment}) _decodePayload(Uint8List bytes) {
+    final raw = utf8.decode(bytes, allowMalformed: true);
+    try {
+      final json = jsonDecode(raw);
+      if (json is Map && json.containsKey('t')) {
+        return (
+          text: json['t'] as String,
+          attachment: json['f'] == null
+              ? null
+              : AttachmentRef.fromJson((json['f'] as Map).cast<String, Object?>()),
+        );
+      }
+    } catch (_) {
+      // contenu non structuré
+    }
+    return (text: raw, attachment: null);
+  }
+
+  /// Chiffre un fichier, le dépose sur le stockage objet, puis envoie sa
+  /// référence et sa clé dans un message chiffré de bout en bout.
+  Future<void> sendAttachment(String filePath) async {
+    final conv = active;
+    final api = _api;
+    final gateway = _gateway;
+    if (conv == null || api == null || gateway == null || !conv.ready) return;
+
+    _setBusy(true);
+    try {
+      final file = File(filePath);
+      final bytes = await file.readAsBytes();
+      final fileName = filePath.split(Platform.pathSeparator).last;
+
+      // Le fichier et son nom sont chiffrés séparément : l'hébergeur du
+      // stockage ne voit ni l'un ni l'autre.
+      final sealed = await gateway.attachmentEncrypt(bytes);
+      final sealedName = await gateway.attachmentEncrypt(
+          Uint8List.fromList(utf8.encode(fileName)));
+
+      final created = await api.createAttachment(
+        conversationId: conv.id,
+        ciphertextSize: sealed.ciphertext.length,
+        encryptedMetadataB64: base64Encode(sealedName.ciphertext),
+      );
+      await api.uploadToStorage(
+          created['uploadUrl'] as String, sealed.ciphertext);
+
+      final ref = AttachmentRef(
+        id: created['attachmentId'] as String,
+        keyBase64: base64Encode(sealed.key),
+        fileName: fileName,
+        size: bytes.length,
+      );
+      await _sendPayload('📎 $fileName', ref);
+      _setBusy(false);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+    }
+  }
+
+  /// Télécharge et déchiffre une pièce jointe, puis l'écrit sur le disque.
+  /// Renvoie le chemin du fichier, ou null en cas d'échec.
+  Future<String?> downloadAttachment(AttachmentRef ref, String targetDir) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return null;
+    try {
+      final info = await api.attachment(ref.id);
+      final ciphertext =
+          await api.downloadFromStorage(info['downloadUrl'] as String);
+      final plain = await gateway.attachmentDecrypt(
+          base64Decode(ref.keyBase64), ciphertext);
+
+      // Le dossier indiqué peut ne pas exister encore : on le crée plutôt que
+      // d'échouer après avoir déchiffré.
+      final dir = Directory(targetDir);
+      if (!await dir.exists()) await dir.create(recursive: true);
+
+      final target = File('$targetDir${Platform.pathSeparator}${ref.fileName}');
+      await target.writeAsBytes(plain);
+      return target.path;
+    } catch (e) {
+      error = _humanize(e);
+      notifyListeners();
+      return null;
     }
   }
 
@@ -528,10 +636,12 @@ class ChatService extends ChangeNotifier {
         // Un message émis par un autre de mes appareils est un message que
         // j'ai écrit : il s'affiche comme tel plutôt que comme reçu.
         final fromMyself = (m['senderUsername'] as String?) == username;
+        final payload = _decodePayload(plain);
         conv.messages.add(ChatMessage(
-          text: utf8.decode(plain),
+          text: payload.text,
           mine: fromMyself,
           at: DateTime.now(),
+          attachment: payload.attachment,
         ));
         conv.lastActivity = DateTime.now();
         touched.add(conv);
@@ -600,15 +710,39 @@ class ChatService extends ChangeNotifier {
 
   // ------------------------------------------------------------------ divers
 
+  /// Traduit une erreur technique en phrase compréhensible. Afficher une
+  /// exception brute à l'utilisateur n'apprend rien à personne.
   String _humanize(Object e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      switch (code) {
+        case 400:
+          return 'Requête refusée par le serveur.';
+        case 401:
+          return 'Session expirée — reconnecte-toi.';
+        case 403:
+          return 'Accès refusé à cette conversation.';
+        case 404:
+          return 'Introuvable sur le serveur.';
+        case 409:
+          return 'Ce nom d’utilisateur est déjà pris.';
+        case 413:
+          return 'Fichier trop volumineux.';
+      }
+      if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError) {
+        return 'Serveur injoignable — vérifie ta connexion.';
+      }
+      return 'Erreur réseau${code != null ? " ($code)" : ""}.';
+    }
+    if (e is ZiaCryptoException) {
+      return 'Erreur cryptographique : ${e.runtimeType}';
+    }
     final s = e.toString();
-    if (s.contains('409')) return 'Ce nom d’utilisateur est déjà pris.';
-    if (s.contains('404')) return 'Utilisateur introuvable.';
-    if (s.contains('401')) return 'Identifiants refusés.';
-    if (s.contains('Connection refused') || s.contains('SocketException')) {
+    if (s.contains('SocketException')) {
       return 'Serveur injoignable — vérifie ta connexion.';
     }
-    return s;
+    return s.length > 160 ? '${s.substring(0, 160)}…' : s;
   }
 
   @override

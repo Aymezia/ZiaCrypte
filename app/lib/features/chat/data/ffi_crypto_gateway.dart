@@ -60,6 +60,14 @@ class FfiCryptoGateway implements CryptoGateway {
           int sessionId, Uint8List header, Uint8List ciphertext) =>
       _engine.decrypt(sessionId, header, ciphertext);
 
+  /// Chiffrement des pièces jointes (clé aléatoire par fichier).
+  Future<({Uint8List key, Uint8List ciphertext})> attachmentEncrypt(
+          Uint8List data) =>
+      _engine.attachmentEncrypt(data);
+
+  Future<Uint8List> attachmentDecrypt(Uint8List key, Uint8List ciphertext) =>
+      _engine.attachmentDecrypt(key, ciphertext);
+
   /// Coffre local chiffré (historique des conversations, etc.).
   Future<void> vaultWrite(String name, Uint8List data) =>
       _engine.vaultWrite(name, data);

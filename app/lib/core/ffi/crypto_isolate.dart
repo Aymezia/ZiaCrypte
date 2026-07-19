@@ -70,6 +70,17 @@ class ZiaCryptoEngine {
           int sessionId, Uint8List header, Uint8List ciphertext) =>
       _call('decrypt', {'session': sessionId, 'header': header, 'ct': ciphertext});
 
+  /// Chiffre un fichier sous une clé aléatoire (renvoyée avec le ciphertext).
+  Future<({Uint8List key, Uint8List ciphertext})> attachmentEncrypt(
+      Uint8List data) async {
+    final sealed =
+        await _call<Map<String, Uint8List>>('attachmentEncrypt', {'data': data});
+    return (key: sealed['key']!, ciphertext: sealed['ciphertext']!);
+  }
+
+  Future<Uint8List> attachmentDecrypt(Uint8List key, Uint8List ciphertext) =>
+      _call('attachmentDecrypt', {'key': key, 'ct': ciphertext});
+
   /// Range une donnée chiffrée dans le coffre local de l'appareil.
   Future<void> vaultWrite(String name, Uint8List data) =>
       _call('vaultWrite', {'name': name, 'data': data});
@@ -186,6 +197,12 @@ class ZiaCryptoEngine {
       case 'decrypt':
         return engine.decrypt(sessions[a['session'] as int]!,
             a['header'] as Uint8List, a['ct'] as Uint8List);
+      case 'attachmentEncrypt':
+        final sealed = engine.attachmentEncrypt(a['data'] as Uint8List);
+        return {'key': sealed.key, 'ciphertext': sealed.ciphertext};
+      case 'attachmentDecrypt':
+        return engine.attachmentDecrypt(
+            a['key'] as Uint8List, a['ct'] as Uint8List);
       case 'vaultWrite':
         engine.vaultWrite(a['name'] as String, a['data'] as Uint8List);
         return null;

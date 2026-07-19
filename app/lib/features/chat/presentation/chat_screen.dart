@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../data/chat_service.dart';
@@ -44,6 +47,108 @@ class _ChatScreenState extends State<ChatScreen> {
         );
       }
     });
+  }
+
+  Future<void> _pickAndSendFile() async {
+    String? path;
+    try {
+      final result = await FilePicker.pickFiles(withData: false);
+      path = result?.files.single.path;
+    } catch (_) {
+      // Le sélecteur passe par le portail XDG, absent de certains
+      // environnements (gestionnaire de fenêtres minimal, session distante).
+      // Plutôt que de ne rien faire, on demande le chemin à la main.
+      path = await _askFilePath();
+    }
+    if (path == null) return;
+
+    final file = File(path);
+    if (!await file.exists()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Fichier introuvable : $path')),
+      );
+      return;
+    }
+    final size = await file.length();
+    // Le serveur refuse au-delà : autant le dire avant de chiffrer.
+    if (size > 64 * 1024 * 1024) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Fichier trop volumineux (64 Mo maximum)')),
+      );
+      return;
+    }
+    await widget.service.sendAttachment(path);
+  }
+
+  Future<void> _openAttachment(AttachmentRef ref) async {
+    String? dir;
+    try {
+      dir = await FilePicker.getDirectoryPath();
+    } catch (_) {
+      dir = await _askFilePath(
+        title: 'Enregistrer dans',
+        label: 'Chemin du dossier',
+        initial: Platform.environment['HOME'] ?? '/tmp',
+      );
+    }
+    if (dir == null) return;
+
+    final saved = await widget.service.downloadAttachment(ref, dir);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(saved == null
+          ? 'Téléchargement impossible'
+          : 'Enregistré : $saved'),
+    ));
+  }
+
+  /// Repli quand aucun sélecteur graphique n'est disponible : saisie du chemin.
+  Future<String?> _askFilePath({
+    String title = 'Choisir un fichier',
+    String label = 'Chemin du fichier',
+    String initial = '',
+  }) async {
+    // Texte pré-sélectionné : le chemin proposé sert de suggestion, pas de
+    // préfixe. Sans ça, taper un chemin l'ajoute à la suite du précédent.
+    final controller = TextEditingController(text: initial)
+      ..selection = TextSelection(baseOffset: 0, extentOffset: initial.length);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Aucun sélecteur de fichiers n’est disponible sur ce système.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: label,
+                border: const OutlineInputBorder(),
+              ),
+              onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _promptNewConversation() async {
@@ -284,6 +389,39 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Un message contenant un fichier : cliquer le télécharge et le déchiffre.
+  Widget _attachmentBubble(ThemeData theme, ChatMessage m) {
+    final ref = m.attachment!;
+    final color = m.mine
+        ? theme.colorScheme.onPrimaryContainer
+        : theme.colorScheme.onSurface;
+    return InkWell(
+      onTap: () => _openAttachment(ref),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.insert_drive_file_outlined, size: 20, color: color),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(ref.fileName,
+                    style: TextStyle(color: color, fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis),
+                Text(
+                  '${(ref.size / 1024).toStringAsFixed(0)} Ko · appuyer pour enregistrer',
+                  style: TextStyle(fontSize: 11, color: color.withValues(alpha: 0.75)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _messagesAndComposer(ThemeData theme, ChatService s) {
     final conv = s.active!;
     return Column(
@@ -316,14 +454,16 @@ class _ChatScreenState extends State<ChatScreen> {
                               : theme.colorScheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Text(
-                          m.text,
-                          style: TextStyle(
-                            color: m.mine
-                                ? theme.colorScheme.onPrimaryContainer
-                                : theme.colorScheme.onSurface,
-                          ),
-                        ),
+                        child: m.hasAttachment
+                            ? _attachmentBubble(theme, m)
+                            : Text(
+                                m.text,
+                                style: TextStyle(
+                                  color: m.mine
+                                      ? theme.colorScheme.onPrimaryContainer
+                                      : theme.colorScheme.onSurface,
+                                ),
+                              ),
                       ),
                     );
                   },
@@ -335,6 +475,16 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: Row(
               children: [
+                IconButton(
+                  tooltip: 'Joindre un fichier',
+                  onPressed: conv.ready && !s.busy ? _pickAndSendFile : null,
+                  icon: s.busy
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.attach_file_rounded),
+                ),
                 Expanded(
                   child: TextField(
                     controller: _input,
