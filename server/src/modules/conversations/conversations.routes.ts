@@ -25,14 +25,27 @@ export async function conversationsRoutes(app: FastifyInstance) {
     // cela son identifiant changerait à chaque fois, et l'historique local
     // rattaché à cet identifiant serait perdu.
     if (body.type === 'direct' && participantIds.length === 2) {
-      const existing = await prisma.conversation.findFirst({
+      // Un `every` seul ne convient pas : il est vrai par vacuité sur une
+      // conversation SANS participant (il en reste après la suppression des
+      // comptes concernés). findFirst en renvoyait une, le contrôle de taille
+      // échouait, et une conversation en double était créée alors qu'une
+      // valide existait — l'historique local rattaché à l'ancien identifiant
+      // devenait alors inaccessible.
+      //
+      // On exige donc explicitement la présence de CHAQUE participant, et
+      // exactement deux au total pour exclure un groupe qui les contiendrait.
+      const candidates = await prisma.conversation.findMany({
         where: {
           type: 'direct',
-          participants: { every: { userId: { in: participantIds } } },
+          AND: participantIds.map((userId) => ({
+            participants: { some: { userId } },
+          })),
         },
         include: { participants: true },
+        orderBy: { createdAt: 'asc' },
       });
-      if (existing && existing.participants.length === 2) {
+      const existing = candidates.find((c) => c.participants.length === 2);
+      if (existing) {
         return reply.code(200).send({ id: existing.id, type: existing.type });
       }
     }

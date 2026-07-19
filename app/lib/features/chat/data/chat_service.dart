@@ -365,8 +365,9 @@ class ChatService extends ChangeNotifier {
       final convId = await api.createConversation(peerUserId);
 
       final conv = _conversations[convId] ??
-          Conversation(id: convId, peerUsername: peer);
+          Conversation(id: convId, peerUsername: peer, peerUserId: peerUserId);
       conv.peerUsername = peer;
+      conv.peerUserId = peerUserId;
       if (!_conversations.containsKey(convId)) {
         conv.messages.addAll(await _readHistory(convId));
         _conversations[convId] = conv;
@@ -722,6 +723,9 @@ class ChatService extends ChangeNotifier {
     final convId = m['conversationId'] as String;
     final existing = _conversations[convId];
     if (existing != null) {
+      // Les conversations enregistrées avant l'ajout de ce champ n'ont pas
+      // d'identifiant de correspondant : on le complète dès qu'il arrive.
+      existing.peerUserId ??= m['senderUserId'] as String?;
       await _restoreSessions(existing);
       return existing;
     }
@@ -729,12 +733,69 @@ class ChatService extends ChangeNotifier {
     final conv = Conversation(
       id: convId,
       peerUsername: (m['senderUsername'] as String?) ?? 'inconnu',
+      peerUserId: m['senderUserId'] as String?,
       targetDeviceIds: {m['senderDeviceId'] as String},
     );
     conv.messages.addAll(await _readHistory(convId));
     await _restoreSessions(conv);
     _conversations[convId] = conv;
     return conv;
+  }
+
+  // ------------------------------------------------- vérification de contact
+
+  /// Numéros de sécurité de la conversation active, un par appareil du
+  /// correspondant.
+  ///
+  /// Un contact peut avoir plusieurs appareils, chacun avec sa propre clé
+  /// d'identité : il y a donc un numéro par appareil, et vérifier l'un ne dit
+  /// rien des autres. Masquer cette réalité derrière un numéro unique
+  /// donnerait une fausse impression de sécurité.
+  Future<List<DeviceVerification>> safetyNumbers() async {
+    final conv = active;
+    final pinning = _pinning;
+    final gateway = _gateway;
+    final me = userId;
+    if (conv == null || pinning == null || gateway == null || me == null) {
+      return const [];
+    }
+    final peerId = conv.peerUserId;
+    if (peerId == null) return const [];
+
+    final myKey = await gateway.identityPublicKey();
+    final out = <DeviceVerification>[];
+    for (final identity in pinning.forUser(peerId)) {
+      final number = await pinning.safetyNumber(
+        myIdentityKey: myKey,
+        myUserId: me,
+        peerDeviceId: identity.deviceId,
+        peerUserId: peerId,
+      );
+      if (number != null) {
+        out.add(DeviceVerification(identity: identity, safetyNumber: number));
+      }
+    }
+    return out;
+  }
+
+  /// Enregistre que l'utilisateur a comparé un numéro hors bande.
+  Future<void> markVerified(String deviceId, {bool verified = true}) async {
+    await _pinning?.markVerified(deviceId, verified: verified);
+    notifyListeners();
+  }
+
+  /// Accepte une clé changée après décision explicite de l'utilisateur, puis
+  /// lève le blocage. Le contact repasse en « non vérifié ».
+  Future<void> acceptIdentityChange(String deviceId) async {
+    final alert = identityAlerts[deviceId];
+    if (alert == null) return;
+    await _pinning?.acceptChange(
+      deviceId: deviceId,
+      userId: alert.userId,
+      identityKey: alert.current,
+    );
+    identityAlerts.remove(deviceId);
+    notifyListeners();
   }
 
   // ----------------------------------------------------------------- prekeys

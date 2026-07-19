@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../data/chat_service.dart';
+import 'verification_sheet.dart';
 
 /// Écran principal : liste des conversations à gauche, conversation active à
 /// droite. Sur fenêtre étroite, la liste et la conversation s'alternent.
@@ -373,19 +374,111 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _conversationTitle(ThemeData theme, ChatService s) {
     final conv = s.active!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(conv.peerUsername),
-        Row(
-          children: [
-            Icon(Icons.lock_rounded,
-                size: 11, color: theme.colorScheme.onSurfaceVariant),
-            const SizedBox(width: 4),
-            Text('Chiffré de bout en bout', style: theme.textTheme.bodySmall),
-          ],
-        ),
-      ],
+    // Un contact est « vérifié » seulement si TOUS ses appareils connus le
+    // sont : en vérifier un et l'afficher comme sûr laisserait les autres
+    // passer pour vérifiés sans l'être.
+    final identities = conv.peerUserId == null
+        ? const []
+        : (s.pinning?.forUser(conv.peerUserId!) ?? const []);
+    // Une alerte non tranchée annule le badge : afficher « vérifié » à côté
+    // d'un bandeau disant que la clé a changé serait contradictoire, et la
+    // contradiction se résoudrait dans la tête de l'utilisateur en faveur du
+    // badge rassurant. Le statut vérifié porte sur l'ancienne clé, pas sur
+    // celle que le serveur sert maintenant.
+    final hasPendingAlert = identities
+        .any((i) => s.identityAlerts.containsKey(i.deviceId));
+    final verified = identities.isNotEmpty &&
+        identities.every((i) => i.verified) &&
+        !hasPendingAlert;
+
+    return InkWell(
+      onTap: () => VerificationSheet.show(context, s),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(conv.peerUsername),
+          Row(
+            children: [
+              Icon(verified ? Icons.verified_user_rounded : Icons.lock_rounded,
+                  size: 11,
+                  color: verified
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(
+                verified
+                    ? 'Chiffré · contact vérifié'
+                    : 'Chiffré de bout en bout · appuyer pour vérifier',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Bandeau affiché quand la clé d'identité d'un appareil a changé.
+  ///
+  /// Volontairement impossible à ignorer : c'est le seul moment où une
+  /// substitution de clé par le serveur devient visible, et le message ne
+  /// prétend pas trancher à la place de l'utilisateur.
+  Widget _identityAlertBanner(ThemeData theme, ChatService s) {
+    final entries = s.identityAlerts.entries.toList();
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      color: theme.colorScheme.errorContainer,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.gpp_maybe_rounded,
+                  size: 18, color: theme.colorScheme.onErrorContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'La clé d’identité de ce contact a changé',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Cela arrive après une réinstallation, mais c’est aussi ce qu’on '
+            'observerait si quelqu’un s’intercalait. Les messages vers cet '
+            'appareil sont suspendus. Compare le nouveau numéro de sécurité '
+            'avant d’accepter.',
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onErrorContainer,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => VerificationSheet.show(context, s),
+                child: const Text('Voir le numéro'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonal(
+                onPressed: () => s.acceptIdentityChange(entries.first.key),
+                child: const Text('Accepter la nouvelle clé'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -426,6 +519,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final conv = s.active!;
     return Column(
       children: [
+        // En tête de conversation : impossible de manquer une alerte de
+        // changement de clé.
+        _identityAlertBanner(theme, s),
         Expanded(
           child: conv.messages.isEmpty
               ? Center(

@@ -10,6 +10,7 @@ class Conversation {
   Conversation({
     required this.id,
     required this.peerUsername,
+    this.peerUserId,
     Set<String>? targetDeviceIds,
     Map<String, int>? sessions,
     List<ChatMessage>? messages,
@@ -21,6 +22,14 @@ class Conversation {
 
   final String id;
   String peerUsername;
+
+  /// Identifiant de compte du correspondant. Nécessaire au calcul du numéro de
+  /// sécurité, qui doit reposer sur un ancrage stable — un pseudo peut être
+  /// réattribué après suppression d'un compte.
+  ///
+  /// Nullable : les conversations enregistrées avant l'ajout de ce champ n'en
+  /// ont pas. Il est renseigné à la première réception d'un message.
+  String? peerUserId;
 
   /// Appareils auxquels envoyer : ceux du correspondant, plus les autres
   /// appareils de l'utilisateur lui-même (pour qu'il retrouve ses propres
@@ -43,6 +52,7 @@ class Conversation {
   Map<String, Object?> toJson() => {
         'id': id,
         'peer': peerUsername,
+        if (peerUserId != null) 'peerId': peerUserId,
         'devices': targetDeviceIds.toList(),
         'at': lastActivity.millisecondsSinceEpoch,
       };
@@ -50,6 +60,7 @@ class Conversation {
   static Conversation fromJson(Map<String, Object?> json) => Conversation(
         id: json['id'] as String,
         peerUsername: json['peer'] as String,
+        peerUserId: json['peerId'] as String?,
         targetDeviceIds: ((json['devices'] as List?) ?? const [])
             .cast<String>()
             .toSet(),

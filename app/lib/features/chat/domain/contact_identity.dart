@@ -92,3 +92,23 @@ class IdentityChangedException implements Exception {
       'observerait si quelqu’un s’intercalait. Compare le numéro de sécurité '
       'avant de continuer.';
 }
+
+/// Un appareil du correspondant, avec le numéro à comparer hors bande.
+class DeviceVerification {
+  const DeviceVerification({
+    required this.identity,
+    required this.safetyNumber,
+  });
+
+  final ContactIdentity identity;
+
+  /// 60 chiffres. Affiché en groupes de 5 pour être lisible à voix haute.
+  final String safetyNumber;
+
+  /// Découpe en 12 groupes de 5 chiffres, comme le fait Signal : lire
+  /// soixante chiffres d'affilée au téléphone est une source d'erreurs.
+  List<String> get groups => [
+        for (var i = 0; i < safetyNumber.length; i += 5)
+          safetyNumber.substring(i, i + 5),
+      ];
+}
