@@ -187,6 +187,55 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Entre dans un compte existant depuis cette machine.
+  ///
+  /// Ce n'est pas une « reconnexion » : les clés privées du compte vivent sur
+  /// l'appareil où il a été créé et ne peuvent pas être récupérées auprès du
+  /// serveur — c'est la garantie même du chiffrement de bout en bout. Cette
+  /// machine devient donc un APPAREIL SUPPLÉMENTAIRE du compte, avec sa propre
+  /// identité, et ne verra que les messages échangés à partir de maintenant.
+  Future<void> addDeviceAndConnect({
+    required String user,
+    required String password,
+    String? serverUrl,
+  }) async {
+    _setBusy(true);
+    try {
+      final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
+      // Dossier neuf : cet appareil a sa propre identité, distincte de celle
+      // des autres appareils du compte.
+      final storageKey = _uuidV4();
+      final gateway =
+          await _openGateway(AppStorage.engineStoragePathFor(storageKey));
+      final bundle = await gateway.generatePrekeyBundle();
+
+      final res = await api.addDevice(
+        username: user,
+        password: password,
+        device: {
+          'platform': _platformName(),
+          'deviceName': _platformName(),
+          'identityPublicKey': base64Encode(bundle.identityKey),
+          'signedPrekey': base64Encode(bundle.signedPrekey),
+          'signedPrekeySignature': base64Encode(bundle.signedPrekeySignature),
+          'oneTimePrekeys': [base64Encode(bundle.oneTimePrekey!)],
+        },
+      );
+
+      await _adoptSession(api, gateway, res, user);
+      AppStorage.saveAccount(SavedAccount(
+        username: user,
+        userId: userId!,
+        deviceId: deviceId!,
+        storageKey: storageKey,
+      ));
+      _setBusy(false);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+      rethrow;
+    }
+  }
+
   Future<void> loginAndConnect({required String password, String? serverUrl}) async {
     final account = savedAccount;
     if (account == null) {

@@ -19,8 +19,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final _password = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
-  /// Vrai si l'on crée un compte plutôt que de se reconnecter.
-  late bool _creating = widget.service.savedAccount == null;
+  /// Les trois entrées possibles dans l'application.
+  late _Mode _mode = widget.service.savedAccount == null
+      ? _Mode.creation
+      : _Mode.reconnexion;
+
+  bool get _needsUsername => _mode != _Mode.reconnexion;
 
   @override
   void dispose() {
@@ -34,17 +38,24 @@ class _ConnectScreenState extends State<ConnectScreen> {
     if (!_formKey.currentState!.validate()) return;
     final serverUrl = AppConfig.allowServerOverride ? _server.text.trim() : null;
     try {
-      if (_creating) {
-        await widget.service.registerAndConnect(
-          user: _username.text.trim(),
-          password: _password.text,
-          serverUrl: serverUrl,
-        );
-      } else {
-        await widget.service.loginAndConnect(
-          password: _password.text,
-          serverUrl: serverUrl,
-        );
+      switch (_mode) {
+        case _Mode.creation:
+          await widget.service.registerAndConnect(
+            user: _username.text.trim(),
+            password: _password.text,
+            serverUrl: serverUrl,
+          );
+        case _Mode.compteExistant:
+          await widget.service.addDeviceAndConnect(
+            user: _username.text.trim(),
+            password: _password.text,
+            serverUrl: serverUrl,
+          );
+        case _Mode.reconnexion:
+          await widget.service.loginAndConnect(
+            password: _password.text,
+            serverUrl: serverUrl,
+          );
       }
     } catch (_) {
       // l'erreur est exposée par le service
@@ -80,9 +91,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
                               ?.copyWith(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
                       Text(
-                        _creating
-                            ? 'Messagerie chiffrée de bout en bout'
-                            : 'Content de te revoir, ${account?.username ?? ''}',
+                        switch (_mode) {
+                          _Mode.creation => 'Messagerie chiffrée de bout en bout',
+                          _Mode.compteExistant =>
+                            'Ajouter cet appareil à un compte existant',
+                          _Mode.reconnexion =>
+                            'Content de te revoir, ${account?.username ?? ''}',
+                        },
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant),
@@ -115,9 +130,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         const SizedBox(height: 16),
                       ],
 
-                      // Le pseudo n'est demandé qu'à la création : à la
-                      // reconnexion, l'appareil sait déjà à qui il appartient.
-                      if (_creating) ...[
+                      // À la reconnexion seule, l'appareil sait déjà à qui il
+                      // appartient : le pseudo est inutile.
+                      if (_needsUsername) ...[
                         TextFormField(
                           controller: _username,
                           decoration: const InputDecoration(
@@ -135,7 +150,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       TextFormField(
                         controller: _password,
                         obscureText: true,
-                        autofocus: !_creating,
+                        autofocus: !_needsUsername,
                         onFieldSubmitted: (_) => _submit(),
                         decoration: const InputDecoration(
                           labelText: 'Mot de passe',
@@ -157,7 +172,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
                                 height: 20,
                                 width: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2))
-                            : Text(_creating ? 'Créer mon compte' : 'Se reconnecter'),
+                            : Text(switch (_mode) {
+                                _Mode.creation => 'Créer mon compte',
+                                _Mode.compteExistant => 'Ajouter cet appareil',
+                                _Mode.reconnexion => 'Se reconnecter',
+                              }),
                       ),
 
                       if (s.error != null) ...[
@@ -171,26 +190,44 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         ),
                       ],
 
-                      // Bascule entre reconnexion et création.
-                      if (account != null) ...[
-                        const SizedBox(height: 8),
-                        TextButton(
-                          onPressed: s.busy
-                              ? null
-                              : () => setState(() => _creating = !_creating),
-                          child: Text(_creating
-                              ? 'Revenir au compte ${account.username}'
-                              : 'Utiliser un autre compte'),
-                        ),
-                      ],
+                      const SizedBox(height: 8),
+                      for (final target in _Mode.values)
+                        if (target != _mode &&
+                            (target != _Mode.reconnexion || account != null))
+                          TextButton(
+                            onPressed: s.busy
+                                ? null
+                                : () => setState(() => _mode = target),
+                            child: Text(switch (target) {
+                              _Mode.creation => 'Créer un nouveau compte',
+                              _Mode.compteExistant =>
+                                'J’ai déjà un compte ailleurs',
+                              _Mode.reconnexion =>
+                                'Revenir au compte ${account!.username}',
+                            }),
+                          ),
 
                       const SizedBox(height: 16),
                       Text(
-                        _creating
-                            ? 'Les clés privées sont générées et conservées par le '
-                                'moteur natif ; le serveur ne relaie que du chiffré.'
-                            : 'Tes clés sont déjà sur cet appareil, chiffrées par le '
+                        switch (_mode) {
+                          _Mode.creation =>
+                            'Les clés privées sont générées et conservées par le '
+                                'moteur natif ; le serveur ne relaie que du chiffré.',
+                          // Dit franchement, sinon l'utilisateur croira que
+                          // l'application a perdu ses messages : les clés du
+                          // compte vivent sur l'appareil où il a été créé et le
+                          // serveur ne peut pas les fournir. C'est la garantie,
+                          // pas une limitation contournable.
+                          _Mode.compteExistant =>
+                            'Cet appareil rejoint le compte avec sa propre identité. '
+                                'Il ne recevra que les messages échangés à partir de '
+                                'maintenant : l’historique reste sur l’appareil '
+                                'd’origine, et personne — pas même le serveur — ne '
+                                'peut le lui transmettre.',
+                          _Mode.reconnexion =>
+                            'Tes clés sont déjà sur cet appareil, chiffrées par le '
                                 'trousseau du système.',
+                        },
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant),
@@ -221,4 +258,16 @@ class _ConnectScreenState extends State<ConnectScreen> {
       ),
     );
   }
+}
+
+/// Les trois façons d'entrer dans l'application.
+enum _Mode {
+  /// Reprendre le compte déjà installé sur cet appareil.
+  reconnexion,
+
+  /// Créer un compte neuf.
+  creation,
+
+  /// Rattacher cet appareil à un compte existant créé ailleurs.
+  compteExistant,
 }
