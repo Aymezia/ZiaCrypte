@@ -669,6 +669,95 @@ class ChatService extends ChangeNotifier {
 
   static bool _estSync(String texte) => texte.startsWith(_prefixeSync);
 
+  /// Préfixes des messages de CONTRÔLE : édition et suppression.
+  ///
+  /// Ce sont des messages chiffrés comme les autres. Le serveur ne peut donc ni
+  /// les lire, ni les fabriquer, ni supprimer un message à la place de son
+  /// auteur — la suppression « pour tout le monde » reste une décision de
+  /// l'auteur, transmise de bout en bout, pas une opération serveur.
+  static const _prefixeEdit = '__zia_edit__:';
+  static const _prefixeSuppr = '__zia_del__:';
+
+  static bool _estControle(String t) =>
+      t.startsWith(_prefixeEdit) || t.startsWith(_prefixeSuppr);
+
+  /// Modifie un message déjà envoyé, chez soi et chez les destinataires.
+  Future<void> editMessage(ChatMessage m, String nouveauTexte) async {
+    final conv = active;
+    if (conv == null || m.id == null || !m.mine) return;
+    final texte = nouveauTexte.trim();
+    if (texte.isEmpty || texte == m.text) return;
+
+    m.text = texte;
+    m.editedAt = DateTime.now();
+    notifyListeners();
+    await _saveHistory(conv);
+
+    await _diffuserControle(
+        conv, '$_prefixeEdit${jsonEncode({'id': m.id, 't': texte})}');
+  }
+
+  /// Retire un message pour tout le monde.
+  Future<void> deleteForEveryone(ChatMessage m) async {
+    final conv = active;
+    if (conv == null || m.id == null || !m.mine) return;
+
+    m.deletedForEveryone = true;
+    m.text = '';
+    notifyListeners();
+    await _saveHistory(conv);
+
+    await _diffuserControle(
+        conv, '$_prefixeSuppr${jsonEncode({'id': m.id})}');
+  }
+
+  /// Envoie un message de contrôle à tous les appareils de la conversation.
+  Future<void> _diffuserControle(Conversation conv, String charge) async {
+    for (final device in conv.sessions.keys.toList()) {
+      try {
+        await _sendToDevice(conv, device, charge);
+      } catch (_) {
+        // Un appareil injoignable ne doit pas empêcher les autres d'appliquer
+        // la modification.
+      }
+    }
+  }
+
+  /// Applique un message de contrôle reçu.
+  ///
+  /// Ne s'applique qu'aux messages de l'AUTEUR du contrôle : on ne laisse pas
+  /// quelqu'un modifier ou effacer les messages d'autrui. Comme le contrôle
+  /// arrive par la session de son auteur, la correspondance est garantie par le
+  /// chiffrement lui-même.
+  Future<void> _appliquerControle(
+      Conversation conv, String texte, bool deMoi) async {
+    try {
+      final estEdit = texte.startsWith(_prefixeEdit);
+      final json = jsonDecode(texte.substring(
+          (estEdit ? _prefixeEdit : _prefixeSuppr).length)) as Map<String, dynamic>;
+      final cible = json['id'] as String?;
+      if (cible == null) return;
+
+      for (final m in conv.messages) {
+        if (m.id != cible) continue;
+        // L'auteur du contrôle doit être l'auteur du message.
+        if (m.mine != deMoi) return;
+        if (estEdit) {
+          m.text = json['t'] as String? ?? m.text;
+          m.editedAt = DateTime.now();
+        } else {
+          m.deletedForEveryone = true;
+          m.text = '';
+        }
+        await _saveHistory(conv);
+        notifyListeners();
+        return;
+      }
+    } catch (_) {
+      // un contrôle illisible est ignoré
+    }
+  }
+
   // ------------------------------------------ synchronisation multi-appareils
 
   /// Rétro-remplit les appareils frères plus récents avec l'historique.
@@ -1250,6 +1339,12 @@ class ChatService extends ChangeNotifier {
         // j'ai écrit : il s'affiche comme tel plutôt que comme reçu.
         final fromMyself = (m['senderUsername'] as String?) == username;
         final payload = _decodePayload(plain);
+
+        // Message de contrôle : édition ou suppression d'un message existant.
+        if (_estControle(payload.text)) {
+          await _appliquerControle(conv, payload.text, fromMyself);
+          continue;
+        }
 
         // Lot de synchronisation d'historique venu d'un autre de mes appareils.
         if (_estSync(payload.text)) {

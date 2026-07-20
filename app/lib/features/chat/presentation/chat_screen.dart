@@ -674,7 +674,18 @@ class _ChatScreenState extends State<ChatScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (m.hasReply) _citation(theme, m, encre),
-          if (m.hasAttachment)
+          if (m.deletedForEveryone)
+            // On garde la place du message plutôt que de l'effacer : un trou
+            // silencieux dans une conversation est trompeur.
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.block, size: 14, color: encre.withValues(alpha: 0.7)),
+              const SizedBox(width: 6),
+              Text('Message supprimé',
+                  style: TextStyle(
+                      color: encre.withValues(alpha: 0.7),
+                      fontStyle: FontStyle.italic)),
+            ])
+          else if (m.hasAttachment)
             (m.attachment!.isVoice
                 ? VoiceMessageBubble(
                     service: widget.service,
@@ -683,6 +694,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 : _attachmentBubble(theme, m))
           else
             Text(m.text, style: TextStyle(color: encre, height: 1.3)),
+          if (m.isEdited && !m.deletedForEveryone)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('modifié',
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontStyle: FontStyle.italic,
+                      color: encre.withValues(alpha: 0.7))),
+            ),
         ],
       ),
     );
@@ -816,7 +836,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 widget.service.startReply(m);
               },
             ),
-            if (!m.hasAttachment)
+            if (!m.hasAttachment && !m.deletedForEveryone)
               ListTile(
                 leading: const Icon(Icons.copy),
                 title: const Text('Copier le texte'),
@@ -825,10 +845,58 @@ class _ChatScreenState extends State<ChatScreen> {
                   Navigator.of(ctx).pop();
                 },
               ),
+            // Modifier et supprimer pour tous n'ont de sens que sur ses PROPRES
+            // messages : on ne réécrit pas les propos d'autrui.
+            if (m.mine && m.id != null && !m.deletedForEveryone) ...[
+              if (!m.hasAttachment)
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined),
+                  title: const Text('Modifier'),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _modifierMessage(m);
+                  },
+                ),
+              ListTile(
+                leading: Icon(Icons.delete_outline,
+                    color: Theme.of(ctx).colorScheme.error),
+                title: const Text('Supprimer pour tout le monde'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  widget.service.deleteForEveryone(m);
+                },
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _modifierMessage(ChatMessage m) async {
+    final controleur = TextEditingController(text: m.text);
+    final nouveau = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Modifier le message'),
+        content: TextField(
+          controller: controleur,
+          autofocus: true,
+          maxLines: null,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(controleur.text),
+              child: const Text('Enregistrer')),
+        ],
+      ),
+    );
+    if (nouveau != null) await widget.service.editMessage(m, nouveau);
   }
 
   Uint8List? _cleDuPair(Conversation conv) {

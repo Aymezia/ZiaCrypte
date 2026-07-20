@@ -14,7 +14,19 @@ class ChatMessage {
     this.attachment,
     this.pendingReceiptIds = const [],
     this.delivered = false,
+    this.editedAt,
+    this.deletedForEveryone = false,
   });
+
+  /// Date de la dernière modification, si le message a été édité.
+  DateTime? editedAt;
+
+  /// Retiré par son auteur pour tout le monde.
+  ///
+  /// On conserve la ligne plutôt que de l'effacer : un trou silencieux dans une
+  /// conversation est trompeur. On affiche « message supprimé », comme le font
+  /// les messageries qui prennent la question au sérieux.
+  bool deletedForEveryone;
 
   /// Identifiant stable, créé à l'émission et transmis dans le message chiffré.
   /// Permet de citer un message précis. Absent des messages d'avant son
@@ -32,7 +44,7 @@ class ChatMessage {
   final String? replyToText;
   final bool? replyToMine;
 
-  final String text;
+  String text;
   final bool mine;
   final DateTime at;
 
@@ -52,6 +64,7 @@ class ChatMessage {
   bool get hasAttachment => attachment != null;
 
   bool get hasReply => replyToId != null || replyToText != null;
+  bool get isEdited => editedAt != null;
 
   Map<String, Object?> toJson() => {
         't': text,
@@ -64,6 +77,8 @@ class ChatMessage {
         if (attachment != null) 'f': attachment!.toJson(),
         if (pendingReceiptIds.isNotEmpty) 'r': pendingReceiptIds,
         if (delivered) 'd': true,
+        if (editedAt != null) 'e': editedAt!.millisecondsSinceEpoch,
+        if (deletedForEveryone) 'x': true,
       };
 
   static ChatMessage fromJson(Map<String, Object?> json) => ChatMessage(
@@ -80,6 +95,10 @@ class ChatMessage {
         replyToId: json['q'] as String?,
         replyToText: json['qt'] as String?,
         replyToMine: json['qm'] as bool?,
+        editedAt: json['e'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch((json['e'] as num).toInt()),
+        deletedForEveryone: json['x'] as bool? ?? false,
       );
 }
 
