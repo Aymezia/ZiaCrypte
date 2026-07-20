@@ -4,6 +4,36 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+/// Format d'enregistrement : WAV PCM 16 bits, 16 kHz, mono.
+///
+/// ## Pourquoi pas AAC, qui serait cinq fois plus compact
+///
+/// Parce qu'un message vocal qui ne se lit pas ne vaut rien, quelle que soit sa
+/// taille. L'AAC dans un conteneur m4a se lit nativement sur Windows, macOS,
+/// iOS et Android — mais **pas sous Linux** : GStreamer ne sait démultiplexer
+/// le conteneur qu'avec `plugins-base`/`good`, et le décodeur AAC vit dans
+/// `plugins-bad` ou `libav`, absents de beaucoup d'installations. Le message
+/// arrivait donc, se déchiffrait, et ne produisait aucun son.
+///
+/// Opus a le défaut symétrique : parfait sous Linux et Android, absent des
+/// décodeurs natifs de Windows et d'Apple.
+///
+/// Le WAV est le seul format que les quatre plateformes décodent sans aucune
+/// dépendance supplémentaire. Il coûte environ 32 ko par seconde — d'où le
+/// 16 kHz mono, largement suffisant pour la voix, et la durée plafonnée.
+/// On pourra revenir à Opus le jour où l'on embarquera un décodeur.
+const _configVocale = RecordConfig(
+  encoder: AudioEncoder.wav,
+  sampleRate: 16000,
+  numChannels: 1,
+  noiseSuppress: true,
+  autoGain: true,
+);
+
+/// Au-delà, un « message vocal » devient un fichier lourd sans le dire.
+/// 3 minutes de WAV 16 kHz mono ≈ 5,8 Mo.
+const _dureeMaximale = Duration(minutes: 3);
+
 /// Bouton d'enregistrement de message vocal.
 ///
 /// Un appui démarre l'enregistrement, un second l'arrête et déclenche l'envoi.
@@ -59,17 +89,19 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
       }
       final dir = await getTemporaryDirectory();
       final path =
-          '${dir.path}/vocal_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      // AAC dans un conteneur m4a : lu nativement par audioplayers sur toutes
-      // les plateformes, et compact pour un message vocal.
-      await _recorder.start(
-        const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000),
-        path: path,
-      );
+          '${dir.path}/vocal_${DateTime.now().millisecondsSinceEpoch}.wav';
+      await _recorder.start(_configVocale, path: path);
       _startedAt = DateTime.now();
       _elapsed = Duration.zero;
       _ticker = Timer.periodic(const Duration(milliseconds: 200), (_) {
         setState(() => _elapsed = DateTime.now().difference(_startedAt!));
+        // Arrêt automatique : sans borne, un micro laissé ouvert produit un
+        // fichier de plusieurs dizaines de mégaoctets sans que personne s'en
+        // aperçoive avant l'envoi.
+        if (_elapsed >= _dureeMaximale) {
+          _snack('Durée maximale atteinte — enregistrement envoyé.');
+          _stop();
+        }
       });
       setState(() => _recording = true);
     } catch (e) {

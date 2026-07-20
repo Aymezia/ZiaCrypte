@@ -1239,24 +1239,26 @@ class ChatService extends ChangeNotifier {
   /// Télécharge et déchiffre une pièce jointe EN MÉMOIRE, puis l'écrit dans un
   /// fichier temporaire — pour la lecture d'un vocal sans l'exposer en clair
   /// dans un dossier de l'utilisateur.
-  Future<String?> materializeForPlayback(AttachmentRef ref) async {
+  ///
+  /// Lève en cas d'échec plutôt que de renvoyer `null`. La version précédente
+  /// avalait toute exception, et l'appelant ne pouvait afficher qu'un « Lecture
+  /// impossible » qui ne disait ni ce qui avait échoué ni quoi y faire.
+  Future<String> materializeForPlayback(AttachmentRef ref) async {
     final api = _api;
     final gateway = _gateway;
-    if (api == null || gateway == null) return null;
-    try {
-      final info = await api.attachment(ref.id);
-      final ciphertext =
-          await api.downloadFromStorage(info['downloadUrl'] as String);
-      final plain = await gateway.attachmentDecrypt(
-          base64Decode(ref.keyBase64), ciphertext);
-
-      final dir = await Directory.systemTemp.createTemp('zia_voice');
-      final out = File('${dir.path}${Platform.pathSeparator}${ref.fileName}');
-      await out.writeAsBytes(plain);
-      return out.path;
-    } catch (_) {
-      return null;
+    if (api == null || gateway == null) {
+      throw StateError('Session fermée : reconnecte-toi pour lire ce message.');
     }
+    final info = await api.attachment(ref.id);
+    final ciphertext =
+        await api.downloadFromStorage(info['downloadUrl'] as String);
+    final plain =
+        await gateway.attachmentDecrypt(base64Decode(ref.keyBase64), ciphertext);
+
+    final dir = await Directory.systemTemp.createTemp('zia_voice');
+    final out = File('${dir.path}${Platform.pathSeparator}${ref.fileName}');
+    await out.writeAsBytes(plain);
+    return out.path;
   }
 
   /// Télécharge et déchiffre une pièce jointe, puis l'écrit sur le disque.

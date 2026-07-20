@@ -760,7 +760,14 @@ class _ChatScreenState extends State<ChatScreen> {
             ])
           else if (m.hasAttachment)
             (m.attachment!.isVoice
+                // Clé indispensable : c'est le seul widget à état de la liste.
+                // Sans elle, Flutter recycle l'état d'une bulle sur une autre
+                // dès que l'ordre change — et l'historique remonté depuis un
+                // appareil frère insère des messages AVANT les existants. On se
+                // retrouvait alors à lire le vocal d'un message en en affichant
+                // un autre.
                 ? VoiceMessageBubble(
+                    key: ValueKey(m.attachment!.id),
                     service: widget.service,
                     attachment: m.attachment!,
                     mine: mien)
