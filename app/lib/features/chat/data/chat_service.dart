@@ -189,6 +189,26 @@ class ChatService extends ChangeNotifier {
     return 'linux';
   }
 
+  /// Nom lisible de cet appareil, envoyé au serveur à l'enregistrement.
+  ///
+  /// La plateforme seule ne suffit pas : deux machines Linux s'appelaient
+  /// toutes les deux « linux », et l'écran des appareils liés ne permettait
+  /// donc pas de reconnaître celui qu'on n'a pas rattaché soi-même — ce pour
+  /// quoi il existe. Le nom d'hôte les distingue.
+  ///
+  /// C'est une donnée que le serveur voit : on lui donne le nom de la machine,
+  /// pas celui de son propriétaire, et l'utilisateur peut de toute façon
+  /// constater ce qui est stocké depuis cet écran.
+  static String _deviceName() {
+    final hote = Platform.localHostname.trim();
+    final plateforme = _platformName();
+    if (hote.isEmpty || hote == 'localhost') return plateforme;
+    // Borné : le serveur refuse au-delà de 120 caractères, et un nom
+    // interminable rendrait la liste illisible.
+    final court = hote.length > 40 ? hote.substring(0, 40) : hote;
+    return '$court ($plateforme)';
+  }
+
   void _setBusy(bool value, {String? err}) {
     busy = value;
     error = err;
@@ -241,7 +261,7 @@ class ChatService extends ChangeNotifier {
         password: password,
         device: {
           'platform': _platformName(),
-          'deviceName': _platformName(),
+          'deviceName': _deviceName(),
           'identityPublicKey': base64Encode(bundle.identityKey),
           'signedPrekey': base64Encode(bundle.signedPrekey),
           'signedPrekeySignature': base64Encode(bundle.signedPrekeySignature),
@@ -292,7 +312,7 @@ class ChatService extends ChangeNotifier {
         totp: totp,
         device: {
           'platform': _platformName(),
-          'deviceName': _platformName(),
+          'deviceName': _deviceName(),
           'identityPublicKey': base64Encode(bundle.identityKey),
           'signedPrekey': base64Encode(bundle.signedPrekey),
           'signedPrekeySignature': base64Encode(bundle.signedPrekeySignature),
@@ -404,6 +424,9 @@ class ChatService extends ChangeNotifier {
 
   /// Ferme la session sans effacer l'identité ni l'historique local.
   Future<void> logout() async {
+    // Remis à zéro : sans ça, une révocation constatée collerait à la session
+    // suivante et empêcherait toute reconnexion sur cet appareil.
+    _revoqueDetectee = false;
     _poll?.cancel();
     await _socket?.close();
     _socket = null;
@@ -571,6 +594,39 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Inscrit dans la conversation qu'un appareil vient d'être rattaché.
+  ///
+  /// Écrit dans le fil plutôt que dans une notification passagère : un avis
+  /// qu'on peut manquer en regardant ailleurs ne protège de rien, et celui-ci
+  /// doit rester consultable après coup.
+  void _annoncerAppareil(Conversation conv, bool leMien) {
+    conv.messages.add(ChatMessage(
+      text: leMien
+          ? 'Un nouvel appareil a été lié à ton compte. Si ce n’est pas toi, '
+              'révoque-le dans les options et change ton mot de passe.'
+          : '${conv.peerUsername} a lié un nouvel appareil. Il reçoit '
+              'désormais une copie de cette conversation.',
+      mine: false,
+      at: DateTime.now(),
+      systeme: true,
+    ));
+    _saveHistory(conv);
+    notifyListeners();
+  }
+
+  /// Appareils liés au compte, pour l'écran de gestion.
+  Future<List<Map<String, dynamic>>> listerAppareils() async {
+    final api = _api;
+    if (api == null) throw StateError('Session fermée.');
+    return api.mesAppareils();
+  }
+
+  Future<void> revoquerAppareil(String id) async {
+    final api = _api;
+    if (api == null) throw StateError('Session fermée.');
+    await api.revoquerAppareil(id);
+  }
+
   /// Établit une session avec chaque appareil d'un utilisateur qui n'en a pas
   /// encore. L'appareil courant est ignoré (on ne s'écrit pas à soi-même).
   Future<void> _openSessionsWith(Conversation conv, String targetUserId) async {
@@ -579,9 +635,16 @@ class ChatService extends ChangeNotifier {
     if (api == null || gateway == null) return;
 
     final bundles = await api.prekeyBundles(targetUserId);
+
+    // Appareils déjà connus pour cet utilisateur, AVANT d'épingler ceux du lot
+    // courant. S'il en existait déjà et qu'un inconnu apparaît, c'est qu'un
+    // appareil vient d'être rattaché à ce compte.
+    final dejaConnus = _pinning?.forUser(targetUserId).length ?? 0;
+
     for (final bundleJson in bundles) {
       final device = bundleJson['deviceId'] as String;
       if (device == deviceId) continue; // cet appareil-ci
+      final inconnu = _pinning?.forDevice(device) == null;
       conv.targetDeviceIds.add(device);
       // Un appareil du correspondant compte pour le reçu de remise ; l'un des
       // miens, non — sa relève ne dit rien de ce que le destinataire a reçu.
@@ -606,6 +669,19 @@ class ChatService extends ChangeNotifier {
         conv.targetDeviceIds.remove(device);
         notifyListeners();
         continue;
+      }
+
+      // Un appareil apparaît alors qu'on en connaissait déjà pour ce compte :
+      // quelqu'un vient d'en rattacher un.
+      //
+      // C'est ce signal qui rend visible l'attaque que la synchronisation
+      // multi-appareils a rendue possible — mot de passe volé, appareil lié,
+      // copie chiffrée de tout ce qui arrive. C'est aussi ce qui empêche le
+      // serveur d'ajouter discrètement un appareil de son cru : pour qu'il
+      // reçoive quoi que ce soit, il faut que nous chiffrions à son intention,
+      // donc que nous le voyions. Un serveur qui l'ajoute doit l'annoncer.
+      if (inconnu && dejaConnus > 0) {
+        _annoncerAppareil(conv, targetUserId == userId);
       }
 
       final theirBundle = PrekeyBundle(
@@ -1341,6 +1417,20 @@ class ChatService extends ChangeNotifier {
     // Le WebSocket supprime la latence ; le relevé périodique reste un filet de
     // sécurité — la remise ne doit jamais dépendre du seul temps réel.
     _poll = Timer.periodic(const Duration(seconds: 15), (_) {
+      // Appareil révoqué : plus rien ne peut aboutir. Continuer reviendrait à
+      // marteler le serveur pour toujours — un client dont la session est
+      // morte et qui interroge quand même est un déni de service qu'on
+      // s'inflige à soi-même.
+      if (_revoqueDetectee) {
+        final message = error;
+        // On attend la fermeture avant de reposer le message : logout()
+        // réinitialise l'état, et l'écraserait sinon en cours de route.
+        logout().then((_) {
+          error = message;
+          notifyListeners();
+        });
+        return;
+      }
       _pollOnce();
       _checkDeliveries();
       _syncSiblings();
@@ -1661,9 +1751,30 @@ class ChatService extends ChangeNotifier {
   /// dire « identifiants incorrects », pas « session expirée » — dire à
   /// quelqu'un qui essaie de se connecter que sa session a expiré n'a aucun
   /// sens et l'envoie chercher un problème inexistant.
+  /// Le serveur signale-t-il une révocation plutôt qu'un jeton périmé ?
+  ///
+  /// Les deux se présentent en 401 : sans ce code explicite, le client
+  /// tenterait un rafraîchissement qui échouerait indéfiniment, exactement le
+  /// genre de boucle qui remplit les journaux et masque les vrais incidents.
+  static bool _estRevoque(DioException e) {
+    final data = e.response?.data;
+    return data is Map && data['code'] == 'device_revoked';
+  }
+
+  bool _revoqueDetectee = false;
+
   String _humanize(Object e, {_AuthKind auth = _AuthKind.aucun}) {
     if (e is DioException) {
       final code = e.response?.statusCode;
+
+      // Révocation : ce n'est pas une session expirée, et réessayer ne servira
+      // jamais à rien. On coupe pour de bon plutôt que de laisser l'application
+      // repolluer le serveur en boucle avec des requêtes vouées à échouer.
+      if (code == 401 && _estRevoque(e)) {
+        _revoqueDetectee = true;
+        return 'Cet appareil a été révoqué depuis un autre appareil de ton '
+            'compte. Il ne reçoit plus rien.';
+      }
 
       if (auth != _AuthKind.aucun) {
         switch (code) {

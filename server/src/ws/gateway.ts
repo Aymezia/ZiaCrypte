@@ -129,6 +129,29 @@ export class RealtimeGateway {
     return delivered;
   }
 
+  /**
+   * Ferme les sockets d'un appareil révoqué.
+   *
+   * Une connexion WebSocket est authentifiée une seule fois, à l'ouverture :
+   * sans cette coupure, un appareil révoqué garderait un canal temps réel
+   * ouvert et continuerait d'être prévenu des messages en attente, alors même
+   * que l'API le refuse déjà.
+   */
+  deconnecterAppareil(deviceId: string) {
+    const sockets = this.byDevice.get(deviceId);
+    if (!sockets) return;
+    for (const socket of sockets) {
+      // 4003 : code applicatif, pour que le client distingue une révocation
+      // d'une coupure réseau et cesse de se reconnecter en boucle.
+      try {
+        socket.close(4003, 'appareil révoqué');
+      } catch {
+        // socket déjà en cours de fermeture : rien à faire
+      }
+    }
+    this.byDevice.delete(deviceId);
+  }
+
   get connectedDevices() {
     return this.byDevice.size;
   }

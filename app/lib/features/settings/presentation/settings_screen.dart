@@ -5,6 +5,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/config/app_settings.dart';
 import '../../chat/data/chat_service.dart';
 import '../../../core/update/update_service.dart';
+import 'devices_screen.dart';
 import 'two_factor_sheet.dart';
 import 'update_sheet.dart';
 
@@ -146,6 +147,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await TwoFactorSheet.show(context, s, _twoFactorEnabled == true);
               await _refresh2fa();
             },
+          ),
+          ListTile(
+            leading: const Icon(Icons.devices_other),
+            title: const Text('Appareils liés'),
+            subtitle: const Text(
+                'Chacun reçoit une copie chiffrée de tes messages'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => DevicesScreen(service: s),
+            )),
           ),
           ListTile(
             leading: Icon(Icons.logout, color: theme.colorScheme.error),

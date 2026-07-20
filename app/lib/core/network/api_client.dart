@@ -113,6 +113,19 @@ class ApiClient {
         data: {'password': password, 'code': code});
   }
 
+  /// Appareils liés au compte courant, y compris ceux déjà révoqués — pour que
+  /// l'utilisateur garde la trace de ce qu'il a coupé.
+  Future<List<Map<String, dynamic>>> mesAppareils() async {
+    final res = await _dio.get<List<dynamic>>('/v1/devices/me');
+    return (res.data ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// Révoque un appareil : il perd l'accès à l'API, sa session, et disparaît
+  /// des bundles X3DH — plus personne ne chiffrera à son intention.
+  Future<void> revoquerAppareil(String deviceId) async {
+    await _dio.delete<void>('/v1/devices/$deviceId');
+  }
+
   /// Supprime le compte courant (mot de passe redemandé côté serveur).
   Future<void> deleteAccount(String password) async {
     await _dio.delete<void>('/v1/users/me', data: {'password': password});

@@ -660,6 +660,16 @@ class _ChatScreenState extends State<ChatScreen> {
     final nouveauJour =
         precedent == null || !_memeJour(precedent.at, m.at);
 
+    // Un avis de l'application n'est pas un message : ni bulle, ni auteur, ni
+    // groupement. Lui donner l'apparence d'un message laisserait croire qu'il
+    // vient de quelqu'un — donc qu'on peut le fabriquer.
+    if (m.systeme) {
+      return Column(children: [
+        if (nouveauJour) _separateurJour(theme, m.at),
+        _avisSysteme(theme, m),
+      ]);
+    }
+
     final memeAuteurAvant = precedent != null &&
         precedent.mine == m.mine &&
         !nouveauJour &&
@@ -718,6 +728,31 @@ class _ChatScreenState extends State<ChatScreen> {
       ],
     );
   }
+
+  Widget _avisSysteme(ThemeData theme, ChatMessage m) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.tertiaryContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.devices_other,
+                  size: 18, color: theme.colorScheme.onTertiaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(m.text,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onTertiaryContainer,
+                        height: 1.35)),
+              ),
+            ],
+          ),
+        ),
+      );
 
   Widget _bulle(ThemeData theme, ChatMessage m, bool suiteAvant, bool suiteApres) {
     final mien = m.mine;

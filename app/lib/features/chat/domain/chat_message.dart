@@ -18,7 +18,16 @@ class ChatMessage {
     this.deletedForEveryone = false,
     this.readByPeer = false,
     this.readAckSent = false,
+    this.systeme = false,
   });
+
+  /// Avis produit par l'application elle-même, pas par un correspondant.
+  ///
+  /// Sert aux évènements qui doivent rester consultables dans le fil — « un
+  /// appareil vient d'être lié à ce compte ». Affiché sans bulle ni auteur :
+  /// le faire ressembler à un message donnerait à croire qu'il a été envoyé
+  /// par quelqu'un, et donc qu'il peut être falsifié par ce quelqu'un.
+  final bool systeme;
 
   /// Message envoyé, confirmé lu par le correspondant (si celui-ci a activé
   /// les accusés de lecture — ils sont facultatifs des deux côtés).
@@ -91,6 +100,7 @@ class ChatMessage {
         if (deletedForEveryone) 'x': true,
         if (readByPeer) 'lu': true,
         if (readAckSent) 'la': true,
+        if (systeme) 'sys': true,
       };
 
   static ChatMessage fromJson(Map<String, Object?> json) => ChatMessage(
@@ -113,6 +123,7 @@ class ChatMessage {
         deletedForEveryone: json['x'] as bool? ?? false,
         readByPeer: json['lu'] as bool? ?? false,
         readAckSent: json['la'] as bool? ?? false,
+        systeme: json['sys'] as bool? ?? false,
       );
 }
 

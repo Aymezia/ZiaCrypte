@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { decodeKey, HttpError, PUBLIC_KEY_LEN, SIGNATURE_LEN } from '../../lib/errors.js';
 import { requireAuth } from '../../plugins/auth.js';
+import { gateway } from '../../ws/gateway.js';
 import {
   assertDeviceOwnedBy,
   createDevice,
@@ -18,6 +19,72 @@ const prekeyUploadSchema = z.object({
 });
 
 export async function devicesRoutes(app: FastifyInstance) {
+  // Appareils liés au compte courant, avec ce qu'il faut pour reconnaître un
+  // intrus : quand il est apparu, et quand il s'est manifesté pour la dernière
+  // fois. Sans cette liste, un appareil lié avec un mot de passe volé lit tout
+  // indéfiniment sans laisser la moindre trace visible par sa victime.
+  app.get('/devices/me', { preHandler: requireAuth }, async (request) => {
+    const { userId, deviceId } = request.auth!;
+    const devices = await prisma.device.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return devices.map((d) => ({
+      id: d.id,
+      deviceName: d.deviceName,
+      platform: d.platform,
+      isActive: d.isActive,
+      createdAt: d.createdAt.toISOString(),
+      lastSeenAt: d.lastSeenAt.toISOString(),
+      current: d.id === deviceId,
+    }));
+  });
+
+  // Révocation d'un appareil.
+  //
+  // Trois effets, et les trois sont nécessaires :
+  //   1. isActive=false      — l'appareil disparaît des bundles X3DH, donc
+  //                            plus personne ne chiffrera à son intention ;
+  //   2. sessions révoquées  — il ne peut plus rafraîchir ses jetons ;
+  //   3. prekeys supprimées  — aucune nouvelle session ne peut être ouverte
+  //                            vers lui, même par un correspondant qui aurait
+  //                            gardé un ancien bundle en mémoire.
+  //
+  // L'access token en cours, lui, n'est pas révocable cryptographiquement :
+  // c'est `requireAuth` qui le refuse en constatant que l'appareil est inactif.
+  app.delete('/devices/:deviceId', { preHandler: requireAuth }, async (request, reply) => {
+    const params = z.object({ deviceId: z.string().uuid() }).parse(request.params);
+    const { userId } = request.auth!;
+
+    const device = await prisma.device.findUnique({ where: { id: params.deviceId } });
+    if (!device || device.userId !== userId) {
+      throw new HttpError(404, 'appareil introuvable');
+    }
+    if (!device.isActive) return reply.code(204).send();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.device.update({
+        where: { id: device.id },
+        data: { isActive: false },
+      });
+      await tx.authSession.updateMany({
+        where: { deviceId: device.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await tx.oneTimePrekey.deleteMany({ where: { deviceId: device.id } });
+      await tx.signedPrekey.updateMany({
+        where: { deviceId: device.id, isCurrent: true },
+        data: { isCurrent: false },
+      });
+    });
+
+    // Une socket ouverte survivrait à la révocation : elle a été authentifiée
+    // une fois pour toutes à la connexion.
+    gateway?.deconnecterAppareil(device.id);
+
+    return reply.code(204).send();
+  });
+
   // Liste publique des appareils d'un utilisateur (clés publiques uniquement).
   app.get('/devices/:userId', async (request) => {
     const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
