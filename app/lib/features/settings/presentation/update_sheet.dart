@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/update/update_installer.dart';
 import '../../../core/update/update_service.dart';
 
 /// Panneau de mise à jour : recherche, vérification de signature, application.
@@ -23,7 +24,16 @@ class UpdateSheet extends StatefulWidget {
   State<UpdateSheet> createState() => _UpdateSheetState();
 }
 
-enum _Etape { recherche, aJour, disponible, telechargement, prete, refusee, erreur }
+enum _Etape {
+  recherche,
+  aJour,
+  disponible,
+  telechargement,
+  prete,
+  installation,
+  refusee,
+  erreur
+}
 
 class _UpdateSheetState extends State<UpdateSheet> {
   _Etape _etape = _Etape.recherche;
@@ -75,6 +85,26 @@ class _UpdateSheetState extends State<UpdateSheet> {
       if (!mounted) return;
       setState(() {
         _message = 'Téléchargement impossible : $e';
+        _etape = _Etape.erreur;
+      });
+    }
+  }
+
+  /// Applique le fichier vérifié.
+  ///
+  /// Sur le bureau, l'appel ne revient pas : le processus se termine pour
+  /// libérer ses fichiers, et un script relais relance la nouvelle version.
+  Future<void> _installer() async {
+    setState(() => _etape = _Etape.installation);
+    try {
+      await UpdateInstaller.appliquer(_fichierVerifie!);
+      // Android uniquement : l'installateur du système a pris la main.
+      if (mounted) setState(() => _etape = _Etape.prete);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _message = 'Installation impossible : $e\n'
+            'Le fichier vérifié reste disponible ici :\n$_fichierVerifie';
         _etape = _Etape.erreur;
       });
     }
@@ -163,14 +193,36 @@ class _UpdateSheetState extends State<UpdateSheet> {
             ]),
             const SizedBox(height: 12),
             Text(_instructions(), style: theme.textTheme.bodyMedium),
-            const SizedBox(height: 8),
-            SelectableText(_fichierVerifie ?? '',
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            if (!UpdateInstaller.peutInstaller) ...[
+              const SizedBox(height: 8),
+              SelectableText(_fichierVerifie ?? '',
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            ],
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Fermer'),
-            ),
+            Row(children: [
+              if (UpdateInstaller.peutInstaller)
+                FilledButton.icon(
+                  onPressed: _installer,
+                  icon: const Icon(Icons.download_done),
+                  label: Text(Platform.isAndroid
+                      ? 'Installer'
+                      : 'Installer et redémarrer'),
+                ),
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Plus tard'),
+              ),
+            ]),
+          ],
+        _Etape.installation => [
+            const Row(children: [
+              SizedBox(
+                  height: 18, width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 12),
+              Expanded(child: Text('Installation en cours…')),
+            ]),
           ],
         _Etape.refusee => [
             Container(
@@ -196,25 +248,25 @@ class _UpdateSheetState extends State<UpdateSheet> {
           ],
       };
 
-  /// Ce qu'il reste à faire, qui dépend de la plateforme.
+  /// Ce qui va se passer maintenant, qui dépend de la plateforme.
   ///
-  /// L'installation silencieuse diffère radicalement d'un système à l'autre —
-  /// Android exige le consentement de l'utilisateur, Windows une élévation de
-  /// privilèges. Plutôt que de prétendre l'automatiser partout, on indique
-  /// clairement l'étape restante avec le fichier DÉJÀ vérifié.
+  /// On ne promet une installation automatique que là où elle est réellement
+  /// possible. Si le dossier d'installation n'est pas inscriptible, la recopie
+  /// échouerait à mi-parcours — bien pire qu'un refus net : on rend alors la
+  /// main avec le fichier déjà vérifié.
   String _instructions() {
     if (Platform.isAndroid) {
-      return 'Ouvre le fichier pour lancer l’installation. Android demandera '
-          'ta confirmation — c’est lui qui l’impose, pas l’application.';
+      return 'L’installateur d’Android va s’ouvrir et demander ta '
+          'confirmation — c’est le système qui l’impose, aucune application '
+          'ne peut s’en passer.';
     }
-    if (Platform.isLinux) {
-      return 'Extrais cette archive par-dessus ton installation, puis relance '
-          'l’application.';
+    if (!UpdateInstaller.peutInstaller) {
+      return 'ZiaCrypte est installé dans un dossier où il n’a pas le droit '
+          'd’écrire : l’installation automatique est impossible. Extrais cette '
+          'archive par-dessus ton installation, application fermée.';
     }
-    if (Platform.isWindows) {
-      return 'Extrais cette archive par-dessus ton dossier ZiaCrypte, '
-          'application fermée, puis relance-la.';
-    }
-    return 'Remplace l’application par le fichier téléchargé, puis relance-la.';
+    return 'ZiaCrypte va se fermer, se remplacer par cette version, puis se '
+        'relancer. Tes clés et tes messages ne sont pas touchés — ils sont '
+        'ailleurs, dans ton dossier de données.';
   }
 }

@@ -4,6 +4,12 @@
     <!-- Enregistrement des messages vocaux. Demandée à l'exécution par le
          paquet record ; sans cette déclaration, l'enregistrement échoue. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Mise à jour depuis GitHub. Cette permission ne fait qu'autoriser
+         l'application à PROPOSER un APK à l'installateur du système : Android
+         affiche ensuite sa propre confirmation, qu'aucune application ne peut
+         contourner. L'APK a déjà été vérifié par signature Ed25519 avant
+         d'arriver ici. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="ziacrypte"
         android:name="${applicationName}"
@@ -30,6 +36,19 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Passe l'APK téléchargé à l'installateur du système. Depuis
+             Android 7, une URI `file://` est refusée (FileUriExposedException) :
+             il faut un FileProvider, qui n'accorde qu'un accès temporaire au
+             fichier désigné, et à lui seul. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths"/>
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

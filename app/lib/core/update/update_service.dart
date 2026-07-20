@@ -78,7 +78,7 @@ class UpdateService {
     if (asset == null) return null;
     try {
       final res = await _dio.get<Map<String, dynamic>>(
-        'https://api.github.com/repos/${AppConfig.updateRepo}/releases/latest',
+        '${AppConfig.updateApiBase}/repos/${AppConfig.updateRepo}/releases/latest',
         options: Options(
           headers: {'Accept': 'application/vnd.github+json'},
           receiveTimeout: const Duration(seconds: 15),

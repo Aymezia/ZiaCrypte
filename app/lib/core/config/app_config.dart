@@ -34,6 +34,21 @@ class AppConfig {
     defaultValue: 'Aymezia/ZiaCrypte',
   );
 
+  /// Racine de l'API consultée pour les mises à jour.
+  ///
+  /// Fixée à la compilation, donc hors de portée d'un attaquant : la changer
+  /// suppose de reconstruire le binaire. Et même alors, elle ne donne aucun
+  /// pouvoir — la sécurité de la mise à jour ne repose PAS sur l'hôte
+  /// consulté, mais sur la signature Ed25519 vérifiée par le moteur natif.
+  /// Un miroir hostile ne peut que servir des fichiers qui seront refusés.
+  ///
+  /// C'est ce qui permet d'éprouver la chaîne complète en local, et plus tard
+  /// de servir les mises à jour ailleurs que sur GitHub.
+  static const String updateApiBase = String.fromEnvironment(
+    'ZIA_UPDATE_API',
+    defaultValue: 'https://api.github.com',
+  );
+
   /// Affiche le champ « adresse du serveur » (pratique en développement).
   ///   --dart-define=ZIA_ALLOW_SERVER_OVERRIDE=true
   static const bool allowServerOverride = bool.fromEnvironment(

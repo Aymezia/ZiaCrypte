@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/config/app_settings.dart';
+import '../../../core/update/update_notifier.dart';
+import '../../../core/update/update_service.dart';
 import '../../settings/presentation/settings_screen.dart';
+import '../../settings/presentation/update_sheet.dart';
 import '../data/chat_service.dart';
 import 'identity_avatar.dart';
 import 'search_sheet.dart';
@@ -29,9 +32,25 @@ class _ChatScreenState extends State<ChatScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   int _lastMessageCount = 0;
+  UpdateNotifier? _maj;
+
+  @override
+  void initState() {
+    super.initState();
+    // Vérification discrète au lancement : une mise à jour qu'il faut penser à
+    // aller chercher dans un menu n'est pas installée, et ce sont les
+    // corrections de sécurité qui en pâtissent en premier.
+    final engine = widget.service.engine;
+    if (engine != null) {
+      final maj = UpdateNotifier(UpdateService(engine), widget.settings);
+      _maj = maj;
+      maj.verifier();
+    }
+  }
 
   @override
   void dispose() {
+    _maj?.dispose();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -301,6 +320,59 @@ class _ChatScreenState extends State<ChatScreen> {
         body: _conversationList(theme, s),
       );
 
+  /// Bandeau discret quand une version plus récente est publiée.
+  ///
+  /// Informatif, jamais bloquant : rien ne se télécharge tant que l'utilisateur
+  /// n'a pas ouvert le panneau, et « Plus tard » retire le bandeau pour cette
+  /// version. Une messagerie qui harcèle est une messagerie qu'on quitte.
+  Widget _banniereMaj(ThemeData theme) {
+    final maj = _maj;
+    if (maj == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: maj,
+      builder: (context, _) {
+        final info = maj.disponible;
+        if (info == null) return const SizedBox.shrink();
+        return Material(
+          color: theme.colorScheme.primaryContainer,
+          child: InkWell(
+            onTap: () {
+              final engine = widget.service.engine;
+              if (engine != null) {
+                UpdateSheet.show(context, UpdateService(engine));
+              }
+            },
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.system_update_alt,
+                      size: 18, color: theme.colorScheme.onPrimaryContainer),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Version ${info.version} disponible',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onPrimaryContainer,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: maj.ecarter,
+                    child: Text('Plus tard',
+                        style: TextStyle(
+                            color: theme.colorScheme.onPrimaryContainer,
+                            fontSize: 12)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _conversationList(ThemeData theme, ChatService s) {
     final convs = s.conversations;
     return Column(
@@ -367,6 +439,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 style: TextStyle(
                     fontSize: 12, color: theme.colorScheme.onErrorContainer)),
           ),
+        _banniereMaj(theme),
         Expanded(
           child: convs.isEmpty
               ? _noConversations(theme)

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Périmètre du FileProvider de mise à jour.
+
+  Volontairement réduit au cache de l'application : c'est là que l'APK vérifié
+  est écrit (`Directory.systemTemp` sous Android). Élargir ce périmètre
+  reviendrait à laisser une application tierce se faire accorder l'accès à
+  d'autres fichiers via la même autorité.
+-->
+<paths>
+    <cache-path name="updates" path="." />
+</paths>

@@ -65,11 +65,20 @@ echo "   serveur intégré : $ZIA_SERVER_URL"
 # décide quel code l'application acceptera d'installer. La clé privée
 # correspondante reste hors de toute machine publique.
 ZIA_UPDATE_PUBKEY="${ZIA_UPDATE_PUBKEY:-ovIl8hVTU9GEtjODO3Pp9HaF5QCXx+jTiZKzM2xVuN4=}"
-ZIA_VERSION="$(grep -m1 '^version:' "$APP/pubspec.yaml" | sed 's/version: *//' | cut -d+ -f1)"
+# Surchargeable pour tester le chemin de mise à jour : construire une version
+# volontairement ancienne est le seul moyen de vérifier POUR DE VRAI qu'elle
+# détecte, télécharge, authentifie et applique la release publiée.
+ZIA_VERSION="${ZIA_VERSION:-$(grep -m1 '^version:' "$APP/pubspec.yaml" | sed 's/version: *//' | cut -d+ -f1)}"
 echo "   version : $ZIA_VERSION"
+# Racine de l'API de mise à jour. Surchargeable pour éprouver la chaîne contre
+# un miroir local ; la sécurité ne dépend pas de cette adresse mais de la
+# signature vérifiée ensuite.
+ZIA_UPDATE_API="${ZIA_UPDATE_API:-https://api.github.com}"
+echo "   API de mise à jour : $ZIA_UPDATE_API"
 (cd "$APP" && flutter build linux --release \
   --dart-define=ZIA_SERVER_URL="$ZIA_SERVER_URL" \
   --dart-define=ZIA_VERSION="$ZIA_VERSION" \
+  --dart-define=ZIA_UPDATE_API="$ZIA_UPDATE_API" \
   --dart-define=ZIA_UPDATE_PUBKEY="$ZIA_UPDATE_PUBKEY")
 
 echo ">> Assemblage"

@@ -11,13 +11,14 @@ import 'app_storage.dart';
 /// propres à cet appareil. Les secrets restent dans le coffre chiffré du moteur.
 class AppSettings extends ChangeNotifier {
   AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu,
-      this._indicateurEcriture, this._accusesLecture);
+      this._indicateurEcriture, this._accusesLecture, this._versionEcartee);
 
   ThemeMode _themeMode;
   bool _enterToSend;
   bool _onboardingVu;
   bool _indicateurEcriture;
   bool _accusesLecture;
+  String? _versionEcartee;
 
   ThemeMode get themeMode => _themeMode;
   bool get enterToSend => _enterToSend;
@@ -35,6 +36,13 @@ class AppSettings extends ChangeNotifier {
   /// message — une information que personne ne doit donner sans l'avoir choisi.
   bool get accusesLecture => _accusesLecture;
 
+  /// Version de mise à jour écartée par l'utilisateur, s'il y en a une.
+  ///
+  /// On la retient pour ne pas répéter la même bannière à chaque lancement,
+  /// mais une version PLUS récente la fera réapparaître : écarter une mise à
+  /// jour ne doit pas revenir à les désactiver toutes en silence.
+  String? get versionEcartee => _versionEcartee;
+
   /// Préférences en mémoire, pour les tests.
   ///
   /// Permet de choisir l'état de départ — notamment si les écrans d'accueil ont
@@ -47,9 +55,10 @@ class AppSettings extends ChangeNotifier {
     bool onboardingVu = true,
     bool indicateurEcriture = true,
     bool accusesLecture = false,
+    String? versionEcartee,
   }) =>
       AppSettings._(themeMode, enterToSend, onboardingVu, indicateurEcriture,
-          accusesLecture);
+          accusesLecture, versionEcartee);
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
@@ -66,12 +75,13 @@ class AppSettings extends ChangeNotifier {
           json['onboardingVu'] as bool? ?? false,
           json['indicateurEcriture'] as bool? ?? true,
           json['accusesLecture'] as bool? ?? false,
+          json['versionEcartee'] as String?,
         );
       }
     } catch (_) {
       // on retombe sur les valeurs par défaut
     }
-    return AppSettings._(ThemeMode.system, true, false, true, false);
+    return AppSettings._(ThemeMode.system, true, false, true, false, null);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -102,6 +112,13 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  void ecarterVersion(String version) {
+    if (version == _versionEcartee) return;
+    _versionEcartee = version;
+    _save();
+    notifyListeners();
+  }
+
   void marquerOnboardingVu() {
     if (_onboardingVu) return;
     _onboardingVu = true;
@@ -119,6 +136,7 @@ class AppSettings extends ChangeNotifier {
         'onboardingVu': _onboardingVu,
         'indicateurEcriture': _indicateurEcriture,
         'accusesLecture': _accusesLecture,
+        'versionEcartee': _versionEcartee,
       }));
     } catch (_) {
       // écriture best-effort : une préférence non persistée n'est pas critique
