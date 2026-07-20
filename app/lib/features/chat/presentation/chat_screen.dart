@@ -2,10 +2,12 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/config/app_settings.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../data/chat_service.dart';
+import 'identity_avatar.dart';
 import 'verification_sheet.dart';
 import 'voice_message_bubble.dart';
 import 'voice_recorder_button.dart';
@@ -371,21 +373,13 @@ class _ChatScreenState extends State<ChatScreen> {
                     return ListTile(
                       selected: selected,
                       selectedTileColor: theme.colorScheme.surfaceContainerHighest,
-                      leading: CircleAvatar(
-                        backgroundColor: theme.colorScheme.primaryContainer,
-                        // Un groupe se reconnaît d'un coup d'œil : une
-                        // initiale seule ne dit pas à combien de personnes on
-                        // s'apprête à écrire.
-                        child: c.isGroup
-                            ? Icon(Icons.groups_rounded,
-                                size: 20,
-                                color: theme.colorScheme.onPrimaryContainer)
-                            : Text(
-                                c.peerUsername.characters.first.toUpperCase(),
-                                style: TextStyle(
-                                    color:
-                                        theme.colorScheme.onPrimaryContainer),
-                              ),
+                      // Avatar dérivé de la clé d'identité : si la clé change,
+                      // l'apparence change. Indice visuel qui double la
+                      // bannière d'alerte, pour qui ne lit pas les bannières.
+                      leading: IdentityAvatar(
+                        label: c.peerUsername,
+                        identityKey: _cleDuPair(c),
+                        isGroup: c.isGroup,
                       ),
                       title: Text(c.peerUsername,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -573,25 +567,291 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Un message contenant un fichier : cliquer le télécharge et le déchiffre.
-  /// Petit indicateur sous un message envoyé : une coche « envoyé », deux
-  /// coches « remis à un appareil du correspondant ». Volontairement discret —
-  /// c'est une confirmation, pas un contenu.
-  Widget _deliveryTick(ThemeData theme, ChatMessage m) {
+  // ------------------------------------------------ rendu d'un message
+
+  /// Une ligne de la conversation : séparateur de jour éventuel, avatar,
+  /// citation, bulle et statut.
+  ///
+  /// Les messages consécutifs d'un même auteur, à moins de cinq minutes
+  /// d'écart, sont GROUPÉS : l'avatar n'apparaît qu'une fois et les bulles se
+  /// resserrent. C'est ce qui distingue une liste de bulles d'une vraie
+  /// conversation lisible.
+  Widget _ligneMessage(ThemeData theme, Conversation conv, ChatMessage m,
+      ChatMessage? precedent, ChatMessage? suivant) {
+    final nouveauJour =
+        precedent == null || !_memeJour(precedent.at, m.at);
+
+    final memeAuteurAvant = precedent != null &&
+        precedent.mine == m.mine &&
+        !nouveauJour &&
+        m.at.difference(precedent.at).inMinutes < 5;
+    final memeAuteurApres = suivant != null &&
+        suivant.mine == m.mine &&
+        _memeJour(m.at, suivant.at) &&
+        suivant.at.difference(m.at).inMinutes < 5;
+
+    // Dernier d'un groupe : c'est lui qui porte l'avatar et l'heure.
+    final finDeGroupe = !memeAuteurApres;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (nouveauJour) _separateurJour(theme, m.at),
+        Padding(
+          padding: EdgeInsets.only(top: memeAuteurAvant ? 2 : 10),
+          child: Row(
+            mainAxisAlignment:
+                m.mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (!m.mine)
+                SizedBox(
+                  width: 36,
+                  child: finDeGroupe
+                      ? IdentityAvatar(
+                          label: conv.peerUsername,
+                          identityKey: _cleDuPair(conv),
+                          size: 30,
+                          isGroup: conv.isGroup,
+                        )
+                      : null,
+                ),
+              Flexible(
+                child: GestureDetector(
+                  onLongPress: () => _menuMessage(m),
+                  onSecondaryTap: () => _menuMessage(m),
+                  child: Column(
+                    crossAxisAlignment: m.mine
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _bulle(theme, m, memeAuteurAvant, memeAuteurApres),
+                      if (finDeGroupe) _piedDeMessage(theme, m),
+                    ],
+                  ),
+                ),
+              ),
+              if (m.mine) const SizedBox(width: 8),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bulle(ThemeData theme, ChatMessage m, bool suiteAvant, bool suiteApres) {
+    final mien = m.mine;
+    final fond = mien
+        ? theme.colorScheme.primary
+        : theme.colorScheme.surfaceContainerHighest;
+    final encre =
+        mien ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
+
+    // Coins : arrondis partout, sauf du côté de l'auteur au milieu d'un groupe.
+    const grand = Radius.circular(18);
+    const petit = Radius.circular(6);
+    final rayons = BorderRadius.only(
+      topLeft: mien ? grand : (suiteAvant ? petit : grand),
+      topRight: mien ? (suiteAvant ? petit : grand) : grand,
+      bottomLeft: mien ? grand : (suiteApres ? petit : grand),
+      bottomRight: mien ? (suiteApres ? petit : grand) : grand,
+    );
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      constraints: const BoxConstraints(maxWidth: 520),
+      decoration: BoxDecoration(color: fond, borderRadius: rayons),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (m.hasReply) _citation(theme, m, encre),
+          if (m.hasAttachment)
+            (m.attachment!.isVoice
+                ? VoiceMessageBubble(
+                    service: widget.service,
+                    attachment: m.attachment!,
+                    mine: mien)
+                : _attachmentBubble(theme, m))
+          else
+            Text(m.text, style: TextStyle(color: encre, height: 1.3)),
+        ],
+      ),
+    );
+  }
+
+  /// Extrait du message cité, affiché au-dessus de la réponse.
+  Widget _citation(ThemeData theme, ChatMessage m, Color encre) => Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.only(left: 8),
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: encre.withValues(alpha: 0.6), width: 3),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              m.replyToMine == true ? 'Toi' : 'Réponse',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: encre.withValues(alpha: 0.85)),
+            ),
+            Text(
+              m.replyToText ?? '',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: encre.withValues(alpha: 0.75)),
+            ),
+          ],
+        ),
+      );
+
+  /// Heure et statut de remise, sous le dernier message d'un groupe.
+  Widget _piedDeMessage(ThemeData theme, ChatMessage m) {
     final couleur = theme.colorScheme.onSurfaceVariant;
     return Padding(
-      padding: const EdgeInsets.only(top: 2, right: 4),
+      padding: const EdgeInsets.only(top: 3, left: 8, right: 8),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(m.delivered ? Icons.done_all : Icons.done, size: 13, color: couleur),
-          const SizedBox(width: 3),
-          Text(
-            m.delivered ? 'Remis' : 'Envoyé',
-            style: TextStyle(fontSize: 10, color: couleur),
+          Text(_heure(m.at),
+              style: TextStyle(fontSize: 11, color: couleur)),
+          if (m.mine && m.pendingReceiptIds.isNotEmpty) ...[
+            const SizedBox(width: 5),
+            Icon(m.delivered ? Icons.done_all : Icons.done,
+                size: 13, color: couleur),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Bandeau au-dessus du composeur indiquant à quoi l'on répond.
+  Widget _barreCitation(ThemeData theme, ChatService s) {
+    final m = s.replyingTo!;
+    return Container(
+      color: theme.colorScheme.surfaceContainerHighest,
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 34,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Réponse à ${m.mine ? "toi-même" : "ce message"}',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: theme.colorScheme.primary)),
+                Text(
+                  m.hasAttachment ? 'Pièce jointe' : m.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Annuler la réponse',
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: s.cancelReply,
           ),
         ],
       ),
     );
+  }
+
+  Widget _separateurJour(ThemeData theme, DateTime jour) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Expanded(child: Divider(color: theme.dividerColor)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                _libelleJour(jour),
+                style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+            Expanded(child: Divider(color: theme.dividerColor)),
+          ],
+        ),
+      );
+
+  /// Menu d'un message : répondre, copier.
+  void _menuMessage(ChatMessage m) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.reply),
+              title: const Text('Répondre'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                widget.service.startReply(m);
+              },
+            ),
+            if (!m.hasAttachment)
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: const Text('Copier le texte'),
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: m.text));
+                  Navigator.of(ctx).pop();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Uint8List? _cleDuPair(Conversation conv) {
+    final pinning = widget.service.pinning;
+    if (pinning == null) return null;
+    for (final d in conv.targetDeviceIds) {
+      final identite = pinning.forDevice(d);
+      if (identite != null) return identite.identityKey;
+    }
+    return null;
+  }
+
+  static bool _memeJour(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  static String _heure(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+  static String _libelleJour(DateTime d) {
+    final now = DateTime.now();
+    final hier = now.subtract(const Duration(days: 1));
+    if (_memeJour(d, now)) return "Aujourd'hui";
+    if (_memeJour(d, hier)) return 'Hier';
+    const mois = [
+      'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
+    ];
+    return '${d.day} ${mois[d.month - 1]}'
+        '${d.year != now.year ? ' ${d.year}' : ''}';
   }
 
   Widget _attachmentBubble(ThemeData theme, ChatMessage m) {
@@ -647,48 +907,15 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: conv.messages.length,
                   itemBuilder: (context, i) {
                     final m = conv.messages[i];
-                    return Align(
-                      alignment:
-                          m.mine ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            margin: const EdgeInsets.only(top: 4),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10),
-                            constraints: const BoxConstraints(maxWidth: 480),
-                            decoration: BoxDecoration(
-                              color: m.mine
-                                  ? theme.colorScheme.primaryContainer
-                                  : theme.colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: m.hasAttachment
-                                ? (m.attachment!.isVoice
-                                    ? VoiceMessageBubble(
-                                        service: widget.service,
-                                        attachment: m.attachment!,
-                                        mine: m.mine)
-                                    : _attachmentBubble(theme, m))
-                                : Text(
-                                    m.text,
-                                    style: TextStyle(
-                                      color: m.mine
-                                          ? theme.colorScheme.onPrimaryContainer
-                                          : theme.colorScheme.onSurface,
-                                    ),
-                                  ),
-                          ),
-                          if (m.mine && m.pendingReceiptIds.isNotEmpty)
-                            _deliveryTick(theme, m),
-                        ],
-                      ),
-                    );
+                    final precedent = i > 0 ? conv.messages[i - 1] : null;
+                    final suivant = i + 1 < conv.messages.length
+                        ? conv.messages[i + 1]
+                        : null;
+                    return _ligneMessage(theme, conv, m, precedent, suivant);
                   },
                 ),
         ),
+        if (s.replyingTo != null) _barreCitation(theme, s),
         SafeArea(
           top: false,
           child: Padding(

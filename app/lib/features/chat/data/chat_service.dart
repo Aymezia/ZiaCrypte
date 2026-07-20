@@ -62,6 +62,19 @@ class ChatService extends ChangeNotifier {
   /// demander le code sans l'exiger d'emblée.
   bool needsTotp = false;
 
+  /// Message auquel la prochaine saisie répondra, ou null.
+  ChatMessage? replyingTo;
+
+  void startReply(ChatMessage m) {
+    replyingTo = m;
+    notifyListeners();
+  }
+
+  void cancelReply() {
+    replyingTo = null;
+    notifyListeners();
+  }
+
   /// Passe le second facteur au client REST courant (écran d'options).
   ApiClient? get api => _api;
 
@@ -835,7 +848,12 @@ class ChatService extends ChangeNotifier {
     if (conv == null || api == null || gateway == null || !conv.ready) return;
 
     try {
-      final clearText = _encodePayload(text, attachment);
+      // Identifiant stable du message, transmis dans le canal chiffré : c'est
+      // lui que citera une éventuelle réponse.
+      final messageId = _uuidV4();
+      final citation = replyingTo;
+      final clearText = _encodePayload(text, attachment,
+          messageId: messageId, replyTo: citation);
       var delivered = 0;
       // Un identifiant de blob par appareil du correspondant : c'est ce qu'on
       // interrogera pour savoir si le message a été remis.
@@ -879,9 +897,22 @@ class ChatService extends ChangeNotifier {
           text: text,
           mine: true,
           at: DateTime.now(),
+          id: messageId,
+          replyToId: citation?.id,
+          replyToText: citation == null
+              ? null
+              : (citation.text.length > 160
+                  ? '${citation.text.substring(0, 160)}…'
+                  : citation.text),
+          replyToMine: citation?.mine,
           attachment: attachment,
           pendingReceiptIds: receiptIds,
         ));
+      }
+      // La citation est consommée, qu'il s'agisse d'un message ou d'une
+      // annonce interne : on ne la reporte pas sur l'envoi suivant.
+      if (replyingTo != null) {
+        replyingTo = null;
       }
       conv.lastActivity = DateTime.now();
       notifyListeners();
@@ -902,16 +933,38 @@ class ChatService extends ChangeNotifier {
   // ------------------------------------------------------------ pièces jointes
 
   /// Contenu d'un message : JSON pour pouvoir porter une pièce jointe.
-  Uint8List _encodePayload(String text, AttachmentRef? attachment) {
+  Uint8List _encodePayload(
+    String text,
+    AttachmentRef? attachment, {
+    String? messageId,
+    ChatMessage? replyTo,
+  }) {
     return Uint8List.fromList(utf8.encode(jsonEncode({
       't': text,
       if (attachment != null) 'f': attachment.toJson(),
+      if (messageId != null) 'i': messageId,
+      if (replyTo != null) ...{
+        'q': replyTo.id,
+        // L'extrait voyage avec la réponse : le destinataire peut ne pas
+        // posséder l'original (appareil lié après coup, historique purgé).
+        'qt': replyTo.text.length > 160
+            ? '${replyTo.text.substring(0, 160)}…'
+            : replyTo.text,
+        'qm': replyTo.mine,
+      },
     })));
   }
 
   /// Décode un contenu. Un message qui n'est pas du JSON est du texte brut :
   /// on le rend tel quel plutôt que d'afficher une erreur.
-  ({String text, AttachmentRef? attachment}) _decodePayload(Uint8List bytes) {
+  ({
+    String text,
+    AttachmentRef? attachment,
+    String? id,
+    String? replyToId,
+    String? replyToText,
+    bool? replyToMine,
+  }) _decodePayload(Uint8List bytes) {
     final raw = utf8.decode(bytes, allowMalformed: true);
     try {
       final json = jsonDecode(raw);
@@ -921,12 +974,23 @@ class ChatService extends ChangeNotifier {
           attachment: json['f'] == null
               ? null
               : AttachmentRef.fromJson((json['f'] as Map).cast<String, Object?>()),
+          id: json['i'] as String?,
+          replyToId: json['q'] as String?,
+          replyToText: json['qt'] as String?,
+          replyToMine: json['qm'] as bool?,
         );
       }
     } catch (_) {
       // contenu non structuré
     }
-    return (text: raw, attachment: null);
+    return (
+      text: raw,
+      attachment: null,
+      id: null,
+      replyToId: null,
+      replyToText: null,
+      replyToMine: null,
+    );
   }
 
   /// Chiffre un fichier, le dépose sur le stockage objet, puis envoie sa
@@ -1205,6 +1269,14 @@ class ChatService extends ChangeNotifier {
           text: payload.text,
           mine: fromMyself,
           at: DateTime.now(),
+          id: payload.id,
+          replyToId: payload.replyToId,
+          replyToText: payload.replyToText,
+          // Le drapeau « mien » du message cité est relatif à son AUTEUR : vu
+          // d'ici, il s'inverse, sauf si le message vient d'un de mes appareils.
+          replyToMine: payload.replyToMine == null
+              ? null
+              : (fromMyself ? payload.replyToMine : !payload.replyToMine!),
           attachment: payload.attachment,
         ));
         conv.lastActivity = DateTime.now();

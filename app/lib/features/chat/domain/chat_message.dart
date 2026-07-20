@@ -7,10 +7,30 @@ class ChatMessage {
     required this.text,
     required this.mine,
     required this.at,
+    this.id,
+    this.replyToId,
+    this.replyToText,
+    this.replyToMine,
     this.attachment,
     this.pendingReceiptIds = const [],
     this.delivered = false,
   });
+
+  /// Identifiant stable, créé à l'émission et transmis dans le message chiffré.
+  /// Permet de citer un message précis. Absent des messages d'avant son
+  /// introduction — l'affichage doit y survivre.
+  final String? id;
+
+  /// Message cité, s'il y en a un.
+  final String? replyToId;
+
+  /// Extrait du message cité, transporté avec la réponse.
+  ///
+  /// Redondant en apparence, mais indispensable : le destinataire peut ne pas
+  /// posséder l'original (appareil lié après coup, historique purgé). Sans cet
+  /// extrait, la citation s'afficherait vide chez lui.
+  final String? replyToText;
+  final bool? replyToMine;
 
   final String text;
   final bool mine;
@@ -31,10 +51,16 @@ class ChatMessage {
 
   bool get hasAttachment => attachment != null;
 
+  bool get hasReply => replyToId != null || replyToText != null;
+
   Map<String, Object?> toJson() => {
         't': text,
         'm': mine,
         'a': at.millisecondsSinceEpoch,
+        if (id != null) 'i': id,
+        if (replyToId != null) 'q': replyToId,
+        if (replyToText != null) 'qt': replyToText,
+        if (replyToMine != null) 'qm': replyToMine,
         if (attachment != null) 'f': attachment!.toJson(),
         if (pendingReceiptIds.isNotEmpty) 'r': pendingReceiptIds,
         if (delivered) 'd': true,
@@ -50,6 +76,10 @@ class ChatMessage {
         pendingReceiptIds:
             ((json['r'] as List?) ?? const []).cast<String>(),
         delivered: json['d'] as bool? ?? false,
+        id: json['i'] as String?,
+        replyToId: json['q'] as String?,
+        replyToText: json['qt'] as String?,
+        replyToMine: json['qm'] as bool?,
       );
 }
 
