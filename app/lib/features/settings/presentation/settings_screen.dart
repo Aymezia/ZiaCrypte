@@ -87,6 +87,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: const Text(
                       'Sinon, Entrée insère un retour à la ligne'),
                 ),
+                SwitchListTile(
+                  value: widget.settings.indicateurEcriture,
+                  onChanged: (v) {
+                    widget.settings.setIndicateurEcriture(v);
+                    widget.service.indicateurEcritureActif = v;
+                  },
+                  title: const Text('Signaler que j’écris'),
+                  subtitle: const Text(
+                      'Le serveur voit ce signal — il connaît déjà à qui tu '
+                      'écris, mais pas quand tu tapes'),
+                ),
+                SwitchListTile(
+                  value: widget.settings.accusesLecture,
+                  onChanged: (v) {
+                    widget.settings.setAccusesLecture(v);
+                    widget.service.accusesLectureActifs = v;
+                  },
+                  title: const Text('Accusés de lecture'),
+                  subtitle: const Text(
+                      'Chiffrés : le serveur ne sait pas que tu as ouvert un '
+                      'message. Désactivés par défaut'),
+                ),
               ],
             ),
           ),

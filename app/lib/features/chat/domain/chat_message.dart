@@ -16,7 +16,17 @@ class ChatMessage {
     this.delivered = false,
     this.editedAt,
     this.deletedForEveryone = false,
+    this.readByPeer = false,
+    this.readAckSent = false,
   });
+
+  /// Message envoyé, confirmé lu par le correspondant (si celui-ci a activé
+  /// les accusés de lecture — ils sont facultatifs des deux côtés).
+  bool readByPeer;
+
+  /// Message reçu dont on a déjà envoyé l'accusé : évite de le renvoyer à
+  /// chaque ouverture de la conversation.
+  bool readAckSent;
 
   /// Date de la dernière modification, si le message a été édité.
   DateTime? editedAt;
@@ -79,6 +89,8 @@ class ChatMessage {
         if (delivered) 'd': true,
         if (editedAt != null) 'e': editedAt!.millisecondsSinceEpoch,
         if (deletedForEveryone) 'x': true,
+        if (readByPeer) 'lu': true,
+        if (readAckSent) 'la': true,
       };
 
   static ChatMessage fromJson(Map<String, Object?> json) => ChatMessage(
@@ -99,6 +111,8 @@ class ChatMessage {
             ? null
             : DateTime.fromMillisecondsSinceEpoch((json['e'] as num).toInt()),
         deletedForEveryone: json['x'] as bool? ?? false,
+        readByPeer: json['lu'] as bool? ?? false,
+        readAckSent: json['la'] as bool? ?? false,
       );
 }
 

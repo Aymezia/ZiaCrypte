@@ -10,11 +10,14 @@ import 'app_storage.dart';
 /// Ne contient rien de sensible : uniquement des choix d'affichage et de confort
 /// propres à cet appareil. Les secrets restent dans le coffre chiffré du moteur.
 class AppSettings extends ChangeNotifier {
-  AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu);
+  AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu,
+      this._indicateurEcriture, this._accusesLecture);
 
   ThemeMode _themeMode;
   bool _enterToSend;
   bool _onboardingVu;
+  bool _indicateurEcriture;
+  bool _accusesLecture;
 
   ThemeMode get themeMode => _themeMode;
   bool get enterToSend => _enterToSend;
@@ -22,6 +25,15 @@ class AppSettings extends ChangeNotifier {
   /// Les écrans d'accueil ont-ils déjà été montrés ? On ne les impose qu'une
   /// fois : les revoir à chaque lancement serait une punition, pas une aide.
   bool get onboardingVu => _onboardingVu;
+
+  /// Signaler à son correspondant qu'on est en train d'écrire.
+  bool get indicateurEcriture => _indicateurEcriture;
+
+  /// Confirmer à son correspondant qu'on a lu ses messages.
+  ///
+  /// DÉSACTIVÉ par défaut. Un accusé de lecture révèle quand on ouvre un
+  /// message — une information que personne ne doit donner sans l'avoir choisi.
+  bool get accusesLecture => _accusesLecture;
 
   /// Préférences en mémoire, pour les tests.
   ///
@@ -33,8 +45,11 @@ class AppSettings extends ChangeNotifier {
     ThemeMode themeMode = ThemeMode.system,
     bool enterToSend = true,
     bool onboardingVu = true,
+    bool indicateurEcriture = true,
+    bool accusesLecture = false,
   }) =>
-      AppSettings._(themeMode, enterToSend, onboardingVu);
+      AppSettings._(themeMode, enterToSend, onboardingVu, indicateurEcriture,
+          accusesLecture);
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
@@ -49,12 +64,14 @@ class AppSettings extends ChangeNotifier {
           _themeFromString(json['theme'] as String?),
           json['enterToSend'] as bool? ?? true,
           json['onboardingVu'] as bool? ?? false,
+          json['indicateurEcriture'] as bool? ?? true,
+          json['accusesLecture'] as bool? ?? false,
         );
       }
     } catch (_) {
       // on retombe sur les valeurs par défaut
     }
-    return AppSettings._(ThemeMode.system, true, false);
+    return AppSettings._(ThemeMode.system, true, false, true, false);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -67,6 +84,20 @@ class AppSettings extends ChangeNotifier {
   void setEnterToSend(bool value) {
     if (value == _enterToSend) return;
     _enterToSend = value;
+    _save();
+    notifyListeners();
+  }
+
+  void setIndicateurEcriture(bool v) {
+    if (v == _indicateurEcriture) return;
+    _indicateurEcriture = v;
+    _save();
+    notifyListeners();
+  }
+
+  void setAccusesLecture(bool v) {
+    if (v == _accusesLecture) return;
+    _accusesLecture = v;
     _save();
     notifyListeners();
   }
@@ -86,6 +117,8 @@ class AppSettings extends ChangeNotifier {
         'theme': _themeMode.name,
         'enterToSend': _enterToSend,
         'onboardingVu': _onboardingVu,
+        'indicateurEcriture': _indicateurEcriture,
+        'accusesLecture': _accusesLecture,
       }));
     } catch (_) {
       // écriture best-effort : une préférence non persistée n'est pas critique

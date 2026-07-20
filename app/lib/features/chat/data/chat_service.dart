@@ -65,6 +65,53 @@ class ChatService extends ChangeNotifier {
   /// Message auquel la prochaine saisie répondra, ou null.
   ChatMessage? replyingTo;
 
+  /// Conversations où le correspondant est en train d'écrire, avec l'instant du
+  /// dernier signal reçu. Un signal non renouvelé se périme tout seul : sans
+  /// cela, un correspondant qui ferme l'application laisserait l'indicateur
+  /// allumé indéfiniment.
+  final Map<String, DateTime> _ecritureEnCours = {};
+  Timer? _expirationEcriture;
+
+  bool ecritDans(String conversationId) {
+    final vu = _ecritureEnCours[conversationId];
+    if (vu == null) return false;
+    return DateTime.now().difference(vu).inSeconds < 6;
+  }
+
+  DateTime? _dernierSignalEnvoye;
+
+  /// Signale que l'on écrit. Limité à un envoi toutes les trois secondes : une
+  /// frappe ne doit pas produire un paquet.
+  void signalerEcriture() {
+    if (!(_settingsEcriture)) return;
+    final conv = active;
+    final socket = _socket;
+    if (conv == null || socket == null) return;
+    final now = DateTime.now();
+    if (_dernierSignalEnvoye != null &&
+        now.difference(_dernierSignalEnvoye!).inSeconds < 3) {
+      return;
+    }
+    _dernierSignalEnvoye = now;
+    final cibles = conv.sessions.keys
+        .where((d) => !conv.ownDeviceIds.contains(d))
+        .toList();
+    if (cibles.isEmpty) return;
+    try {
+      socket.add(jsonEncode({
+        'type': 'typing',
+        'conversationId': conv.id,
+        'to': cibles,
+      }));
+    } catch (_) {
+      // l'indicateur est un confort : son échec n'a aucune conséquence
+    }
+  }
+
+  /// Émission de l'indicateur, désactivable par l'utilisateur.
+  bool _settingsEcriture = true;
+  set indicateurEcritureActif(bool v) => _settingsEcriture = v;
+
   void startReply(ChatMessage m) {
     replyingTo = m;
     notifyListeners();
@@ -474,7 +521,12 @@ class ChatService extends ChangeNotifier {
     activeConversationId = conversationId;
     error = null;
     notifyListeners();
-    unawaited(_restoreSessions(conv).then((_) => notifyListeners()));
+    unawaited(_restoreSessions(conv).then((_) async {
+      notifyListeners();
+      // Ouvrir la conversation vaut lecture : on confirme, si l'utilisateur
+      // l'a activé.
+      await marquerLu(conv);
+    }));
   }
 
   void closeConversation() {
@@ -678,8 +730,34 @@ class ChatService extends ChangeNotifier {
   static const _prefixeEdit = '__zia_edit__:';
   static const _prefixeSuppr = '__zia_del__:';
 
+  /// Accusé de lecture. Chiffré comme le reste : le serveur ne peut pas savoir
+  /// que le message a été ouvert. Désactivé par défaut côté préférences.
+  static const _prefixeLu = '__zia_read__:';
+
   static bool _estControle(String t) =>
-      t.startsWith(_prefixeEdit) || t.startsWith(_prefixeSuppr);
+      t.startsWith(_prefixeEdit) ||
+      t.startsWith(_prefixeSuppr) ||
+      t.startsWith(_prefixeLu);
+
+  /// Émission des accusés de lecture, pilotée par les préférences.
+  bool accusesLectureActifs = false;
+
+  /// Signale que les messages reçus de cette conversation ont été lus.
+  ///
+  /// N'envoie rien si l'utilisateur ne l'a pas activé, et rien non plus s'il
+  /// n'y a aucun message reçu à confirmer.
+  Future<void> marquerLu(Conversation conv) async {
+    if (!accusesLectureActifs) return;
+    final ids = <String>[];
+    for (final m in conv.messages) {
+      if (!m.mine && m.id != null && !m.readAckSent) {
+        ids.add(m.id!);
+        m.readAckSent = true;
+      }
+    }
+    if (ids.isEmpty) return;
+    await _diffuserControle(conv, '$_prefixeLu${jsonEncode({'ids': ids})}');
+  }
 
   /// Modifie un message déjà envoyé, chez soi et chez les destinataires.
   Future<void> editMessage(ChatMessage m, String nouveauTexte) async {
@@ -732,6 +810,26 @@ class ChatService extends ChangeNotifier {
   Future<void> _appliquerControle(
       Conversation conv, String texte, bool deMoi) async {
     try {
+      // Accusé de lecture : marque MES messages comme lus.
+      if (texte.startsWith(_prefixeLu)) {
+        if (deMoi) return; // un accusé venant de moi-même n'a pas de sens
+        final json = jsonDecode(texte.substring(_prefixeLu.length))
+            as Map<String, dynamic>;
+        final ids = ((json['ids'] as List?) ?? const []).cast<String>().toSet();
+        var change = false;
+        for (final m in conv.messages) {
+          if (m.mine && m.id != null && ids.contains(m.id) && !m.readByPeer) {
+            m.readByPeer = true;
+            change = true;
+          }
+        }
+        if (change) {
+          await _saveHistory(conv);
+          notifyListeners();
+        }
+        return;
+      }
+
       final estEdit = texte.startsWith(_prefixeEdit);
       final json = jsonDecode(texte.substring(
           (estEdit ? _prefixeEdit : _prefixeSuppr).length)) as Map<String, dynamic>;
@@ -1265,7 +1363,12 @@ class ChatService extends ChangeNotifier {
 
       socket.listen(
         (event) {
-          if (event is String && event.contains('message.pending')) _pollOnce();
+          if (event is! String) return;
+          if (event.contains('message.pending')) {
+            _pollOnce();
+            return;
+          }
+          _traiterSignalEphemere(event);
         },
         onDone: _onRealtimeLost,
         onError: (_) => _onRealtimeLost(),
@@ -1285,6 +1388,32 @@ class ChatService extends ChangeNotifier {
     Future<void>.delayed(const Duration(seconds: 3), () {
       if (_api != null && _socket == null) _connectRealtime();
     });
+  }
+
+  /// Traite un signal éphémère reçu (indicateur d'écriture).
+  void _traiterSignalEphemere(String brut) {
+    try {
+      final json = jsonDecode(brut) as Map<String, dynamic>;
+      final type = json['type'] as String?;
+      final convId = json['conversationId'] as String?;
+      if (convId == null) return;
+
+      if (type == 'typing') {
+        _ecritureEnCours[convId] = DateTime.now();
+        notifyListeners();
+        // Réveille l'affichage à l'expiration, sinon l'indicateur resterait
+        // allumé jusqu'au prochain évènement quelconque.
+        _expirationEcriture?.cancel();
+        _expirationEcriture = Timer(const Duration(seconds: 7), () {
+          notifyListeners();
+        });
+      } else if (type == 'typing.stop') {
+        _ecritureEnCours.remove(convId);
+        notifyListeners();
+      }
+    } catch (_) {
+      // signal illisible : ignoré
+    }
   }
 
   Future<void> _pollOnce() async {
@@ -1381,6 +1510,9 @@ class ChatService extends ChangeNotifier {
       for (final conv in touched) {
         await _saveHistory(conv);
         await _saveSessions(conv);
+        // Un message qui arrive dans la conversation affichée est lu tout de
+        // suite : l'accusé doit suivre, pas attendre une réouverture.
+        if (conv.id == activeConversationId) await marquerLu(conv);
       }
       if (touched.isNotEmpty) {
         await _saveConversations();

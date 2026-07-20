@@ -27,6 +27,15 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> {
       widget.settingsOverride ?? AppSettings.load();
 
   @override
+  void initState() {
+    super.initState();
+    // Les préférences pilotent le service : sans ce report, les interrupteurs
+    // n'auraient d'effet qu'après un changement manuel.
+    _service.indicateurEcritureActif = _settings.indicateurEcriture;
+    _service.accusesLectureActifs = _settings.accusesLecture;
+  }
+
+  @override
   void dispose() {
     _service.dispose();
     _settings.dispose();

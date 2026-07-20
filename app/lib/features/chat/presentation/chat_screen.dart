@@ -750,8 +750,14 @@ class _ChatScreenState extends State<ChatScreen> {
               style: TextStyle(fontSize: 11, color: couleur)),
           if (m.mine && m.pendingReceiptIds.isNotEmpty) ...[
             const SizedBox(width: 5),
-            Icon(m.delivered ? Icons.done_all : Icons.done,
-                size: 13, color: couleur),
+            Icon(
+              m.delivered || m.readByPeer ? Icons.done_all : Icons.done,
+              size: 13,
+              // Lu : la double coche passe en couleur d'accent. Le
+              // correspondant doit avoir activé les accusés — sans quoi
+              // l'état s'arrête à « remis », ce qui est honnête.
+              color: m.readByPeer ? theme.colorScheme.primary : couleur,
+            ),
           ],
         ],
       ),
@@ -989,6 +995,21 @@ class _ChatScreenState extends State<ChatScreen> {
                   },
                 ),
         ),
+        if (s.ecritDans(conv.id))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+            child: Row(children: [
+              SizedBox(
+                height: 10, width: 10,
+                child: CircularProgressIndicator(
+                    strokeWidth: 1.6, color: theme.colorScheme.primary),
+              ),
+              const SizedBox(width: 8),
+              Text('${conv.peerUsername} écrit…',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.primary)),
+            ]),
+          ),
         if (s.replyingTo != null) _barreCitation(theme, s),
         SafeArea(
           top: false,
@@ -1014,6 +1035,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _input,
+                    onChanged: (_) => widget.service.signalerEcriture(),
                     onSubmitted: (_) => _send(),
                     enabled: conv.ready,
                     decoration: InputDecoration(

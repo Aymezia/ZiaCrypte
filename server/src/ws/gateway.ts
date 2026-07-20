@@ -37,9 +37,14 @@ export class RealtimeGateway {
 
       socket.on('close', () => this.detach(deviceId, socket));
       socket.on('error', () => this.detach(deviceId, socket));
-      // Répond au ping applicatif du client (maintien de connexion).
       socket.on('message', (raw) => {
-        if (raw.toString() === 'ping') socket.send('pong');
+        const texte = raw.toString();
+        // Ping applicatif (maintien de connexion).
+        if (texte === 'ping') {
+          socket.send('pong');
+          return;
+        }
+        this.relayerEphemere(deviceId, texte);
       });
 
       socket.send(JSON.stringify({ type: 'ready' }));
@@ -57,6 +62,51 @@ export class RealtimeGateway {
     if (!sockets) return;
     sockets.delete(socket);
     if (sockets.size === 0) this.byDevice.delete(deviceId);
+  }
+
+  /**
+   * Relaie un signal ÉPHÉMÈRE entre appareils, sans jamais le stocker.
+   *
+   * Sert à l'indicateur « en train d'écrire ». Le passer par un message chiffré
+   * brûlerait un cran de ratchet et créerait un blob à chaque frappe, pour une
+   * information périmée en trois secondes.
+   *
+   * Ce que le serveur apprend : que cet appareil écrit vers tels appareils. Il
+   * connaît DÉJÀ cette relation — il achemine leurs messages. Le supplément est
+   * une granularité temporelle, et c'est pourquoi l'indicateur est désactivable
+   * côté client.
+   *
+   * Rien n'est persisté, rien n'est relayé à qui n'est pas connecté : un
+   * indicateur d'écriture arrivé plus tard n'aurait aucun sens.
+   */
+  private relayerEphemere(expediteur: string, brut: string) {
+    let message: { type?: unknown; to?: unknown; conversationId?: unknown };
+    try {
+      message = JSON.parse(brut);
+    } catch {
+      return;
+    }
+    if (message.type !== 'typing' && message.type !== 'typing.stop') return;
+    if (!Array.isArray(message.to) || typeof message.conversationId !== 'string') {
+      return;
+    }
+    // Borne : un client bavard ne doit pas pouvoir arroser tout le monde.
+    const cibles = (message.to as unknown[])
+      .filter((d): d is string => typeof d === 'string')
+      .slice(0, 50);
+
+    const charge = JSON.stringify({
+      type: message.type,
+      conversationId: message.conversationId,
+      from: expediteur,
+    });
+    for (const cible of cibles) {
+      const sockets = this.byDevice.get(cible);
+      if (!sockets) continue;
+      for (const s of sockets) {
+        if (s.readyState === WebSocket.OPEN) s.send(charge);
+      }
+    }
   }
 
   /**
