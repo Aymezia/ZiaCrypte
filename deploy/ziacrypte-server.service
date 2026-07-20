@@ -1,0 +1,26 @@
+[Unit]
+Description=Serveur ZiaCrypte (relais de messages chiffrés)
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ZiaCrypte/server
+ExecStart=/home/ubuntu/.nvm/versions/node/v24.18.0/bin/node dist/index.js
+
+# Redémarrage automatique. Sans lui, le service disparaît au moindre incident
+# et nginx répond 502 sans que personne ne le sache — exactement ce qui s'est
+# produit tant que le serveur n'était lancé qu'à la main.
+Restart=always
+RestartSec=3
+
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
