@@ -415,6 +415,7 @@ class ChatService extends ChangeNotifier {
     await pinning.load();
     _pinning = pinning;
 
+    await _chargerAvatars();
     await _loadBackfilled();
     await _loadConversations();
     _startPolling();
@@ -810,10 +811,27 @@ class ChatService extends ChangeNotifier {
   /// que le message a été ouvert. Désactivé par défaut côté préférences.
   static const _prefixeLu = '__zia_read__:';
 
+  /// Annonce d'une photo de profil.
+  ///
+  /// ## Pourquoi elle passe par le canal chiffré
+  ///
+  /// Un avatar déposé en clair sur le serveur, comme le font la plupart des
+  /// messageries, dit à l'hébergeur à quoi ressemble chaque utilisateur — et
+  /// permet de relier un compte à une personne bien plus sûrement qu'un pseudo.
+  /// Ici l'image est chiffrée avec une clé aléatoire, exactement comme une
+  /// pièce jointe, et cette clé ne voyage que dans les messages de bout en
+  /// bout. Le stockage n'héberge qu'un blob, le serveur ne voit rien.
+  ///
+  /// Conséquence assumée : seules les personnes avec qui on a une conversation
+  /// ouverte voient la photo. Un annuaire d'avatars visible de tous supposerait
+  /// de les livrer au serveur.
+  static const _prefixeAvatar = '__zia_avatar__:';
+
   static bool _estControle(String t) =>
       t.startsWith(_prefixeEdit) ||
       t.startsWith(_prefixeSuppr) ||
-      t.startsWith(_prefixeLu);
+      t.startsWith(_prefixeLu) ||
+      t.startsWith(_prefixeAvatar);
 
   /// Émission des accusés de lecture, pilotée par les préférences.
   bool accusesLectureActifs = false;
@@ -866,6 +884,112 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Envoie un message de contrôle à tous les appareils de la conversation.
+  /// Avatars connus, par identifiant d'utilisateur. Conservés dans le coffre
+  /// chiffré du moteur — jamais sur le serveur.
+  final Map<String, AttachmentRef> avatars = {};
+  static const _cleCoffreAvatars = 'avatars_contacts';
+
+  final Map<String, Uint8List> _photos = {};
+  final Set<String> _photosEnCours = {};
+
+  /// Photo de profil déchiffrée d'un utilisateur, si elle est déjà là.
+  ///
+  /// Renvoie `null` et lance la récupération en arrière-plan au premier appel :
+  /// un avatar ne doit jamais retarder l'affichage d'une conversation. Les
+  /// octets restent en mémoire — une photo de contact déchiffrée n'a pas plus
+  /// de raison de traîner sur le disque qu'un message.
+  Uint8List? photoDe(String? user) {
+    if (user == null) return null;
+    final dejaLa = _photos[user];
+    if (dejaLa != null) return dejaLa;
+
+    final ref = avatars[user];
+    if (ref == null || _photosEnCours.contains(user)) return null;
+
+    _photosEnCours.add(user);
+    telechargerEnMemoire(ref).then((octets) {
+      _photos[user] = octets;
+      _photosEnCours.remove(user);
+      notifyListeners();
+    }).catchError((_) {
+      // Photo introuvable ou illisible : on n'insiste pas, le dégradé dérivé
+      // de la clé reste affiché. Retenter en boucle ne ferait que marteler le
+      // stockage pour un élément décoratif.
+      _photosEnCours.remove(user);
+    });
+    return null;
+  }
+
+  Future<void> _chargerAvatars() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    try {
+      final brut = await gateway.vaultRead(_cleCoffreAvatars);
+      if (brut == null || brut.isEmpty) return;
+      final json = jsonDecode(utf8.decode(brut)) as Map<String, dynamic>;
+      avatars.clear();
+      json.forEach((user, ref) {
+        avatars[user] =
+            AttachmentRef.fromJson((ref as Map).cast<String, Object?>());
+      });
+      notifyListeners();
+    } catch (_) {
+      // Registre illisible : on repart à vide plutôt que d'empêcher le
+      // démarrage. Les photos réapparaîtront à la prochaine annonce.
+      avatars.clear();
+    }
+  }
+
+  Future<void> _sauverAvatars() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    final json = <String, Object?>{};
+    avatars.forEach((user, ref) => json[user] = ref.toJson());
+    await gateway.vaultWrite(
+        _cleCoffreAvatars, Uint8List.fromList(utf8.encode(jsonEncode(json))));
+  }
+
+  /// Définit sa photo de profil et l'annonce à ses correspondants.
+  ///
+  /// L'image suit le chemin des pièces jointes : chiffrée sur l'appareil avec
+  /// une clé aléatoire, déposée sur le stockage, et seule la référence — avec
+  /// sa clé — est diffusée dans le canal chiffré.
+  Future<void> definirAvatar(String cheminImage) async {
+    final api = _api;
+    final gateway = _gateway;
+    final moi = userId;
+    if (api == null || gateway == null || moi == null) return;
+
+    _setBusy(true);
+    try {
+      final octets = await File(cheminImage).readAsBytes();
+      // Borne volontairement basse : un avatar est affiché à 40 pixels de côté.
+      // Au-delà, on ferait payer à chaque correspondant le téléchargement d'une
+      // photo pleine résolution pour une vignette.
+      if (octets.length > 2 * 1024 * 1024) {
+        _setBusy(false,
+            err: 'Photo trop lourde (2 Mo maximum). Réduis-la avant de '
+                'l’envoyer — elle sera affichée en tout petit.');
+        return;
+      }
+      final nom = cheminImage.split(Platform.pathSeparator).last;
+      final ref = await _deposerPieceJointe(octets, nom);
+
+      avatars[moi] = ref;
+      await _sauverAvatars();
+
+      // Annonce à toutes les conversations ouvertes : chacune a déjà des
+      // sessions établies, donc rien de nouveau n'est révélé au serveur.
+      final charge = '$_prefixeAvatar${jsonEncode(ref.toJson())}';
+      for (final conv in _conversations.values) {
+        await _diffuserControle(conv, charge);
+      }
+      _setBusy(false);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+    }
+  }
+
   Future<void> _diffuserControle(Conversation conv, String charge) async {
     for (final device in conv.sessions.keys.toList()) {
       try {
@@ -886,6 +1010,22 @@ class ChatService extends ChangeNotifier {
   Future<void> _appliquerControle(
       Conversation conv, String texte, bool deMoi) async {
     try {
+      // Photo de profil annoncée par un correspondant (ou par un de mes
+      // propres appareils). On retient la référence ; l'image elle-même n'est
+      // téléchargée qu'au moment de l'afficher.
+      if (texte.startsWith(_prefixeAvatar)) {
+        final json = jsonDecode(texte.substring(_prefixeAvatar.length))
+            as Map<String, dynamic>;
+        final ref = AttachmentRef.fromJson(json.cast<String, Object?>());
+        final proprietaire = deMoi ? userId : conv.peerUserId;
+        if (proprietaire != null) {
+          avatars[proprietaire] = ref;
+          await _sauverAvatars();
+          notifyListeners();
+        }
+        return;
+      }
+
       // Accusé de lecture : marque MES messages comme lus.
       if (texte.startsWith(_prefixeLu)) {
         if (deMoi) return; // un accusé venant de moi-même n'a pas de sens
@@ -1272,6 +1412,41 @@ class ChatService extends ChangeNotifier {
     final fileName = filePath.split(Platform.pathSeparator).last;
     await _uploadAndSend(bytes, fileName,
         label: '🎤 Message vocal', voiceDurationMs: durationMs);
+  }
+
+  /// Chiffre et dépose des octets sur le stockage, puis renvoie la référence.
+  ///
+  /// Extrait de l'envoi de pièce jointe parce que la photo de profil suit
+  /// exactement le même chemin — chiffrement local, dépôt d'un blob opaque —
+  /// mais sans conversation à laquelle la rattacher ni message à publier.
+  Future<AttachmentRef> _deposerPieceJointe(
+    Uint8List bytes,
+    String fileName, {
+    String? conversationId,
+    int? voiceDurationMs,
+  }) async {
+    final api = _api!;
+    final gateway = _gateway!;
+    // Le fichier et son nom sont chiffrés séparément : l'hébergeur du stockage
+    // ne voit ni l'un ni l'autre.
+    final sealed = await gateway.attachmentEncrypt(bytes);
+    final sealedName = await gateway
+        .attachmentEncrypt(Uint8List.fromList(utf8.encode(fileName)));
+
+    final created = await api.createAttachment(
+      conversationId: conversationId,
+      ciphertextSize: sealed.ciphertext.length,
+      encryptedMetadataB64: base64Encode(sealedName.ciphertext),
+    );
+    await api.uploadToStorage(created['uploadUrl'] as String, sealed.ciphertext);
+
+    return AttachmentRef(
+      id: created['attachmentId'] as String,
+      keyBase64: base64Encode(sealed.key),
+      fileName: fileName,
+      size: bytes.length,
+      voiceDurationMs: voiceDurationMs,
+    );
   }
 
   /// Chiffre, dépose et annonce une pièce jointe (fichier ou vocal).

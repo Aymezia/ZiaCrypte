@@ -207,13 +207,15 @@ class ApiClient {
   }
 
   /// Réserve une pièce jointe et obtient l'URL de dépôt (pré-signée).
+  /// [conversationId] absent pour une photo de profil : elle n'appartient à
+  /// aucune conversation, ne doit pas disparaître avec elle, et n'expire pas.
   Future<Map<String, dynamic>> createAttachment({
-    required String conversationId,
+    String? conversationId,
     required int ciphertextSize,
     required String encryptedMetadataB64,
   }) async {
     final res = await _dio.post<Map<String, dynamic>>('/v1/attachments', data: {
-      'conversationId': conversationId,
+      if (conversationId != null) 'conversationId': conversationId,
       'ciphertextSize': ciphertextSize,
       'encryptedMetadata': encryptedMetadataB64,
     });

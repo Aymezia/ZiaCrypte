@@ -18,7 +18,17 @@ class IdentityAvatar extends StatelessWidget {
     this.identityKey,
     this.size = 40,
     this.isGroup = false,
+    this.photo,
   });
+
+  /// Photo de profil DÉCHIFFRÉE, si le contact en a publié une et qu'elle a
+  /// déjà été récupérée.
+  ///
+  /// Elle remplace le dégradé, mais ne le supprime pas : le dégradé reste
+  /// affiché tant que la photo n'est pas là, et redevient seul repère si elle
+  /// disparaît. Une photo est choisie par son propriétaire et n'atteste de
+  /// rien — le dégradé, lui, change quand la clé change.
+  final Uint8List? photo;
 
   /// Sert à l'initiale affichée.
   final String label;
@@ -63,6 +73,26 @@ class IdentityAvatar extends StatelessWidget {
         ? '?'
         : label.trim().characters.first.toUpperCase();
 
+    final image = photo;
+    if (image != null) {
+      return ClipOval(
+        child: Image.memory(
+          image,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          // Photo illisible : on retombe sur le dégradé plutôt que d'afficher
+          // un trou. Une image corrompue ne doit pas effacer le repère qui,
+          // lui, détecte un changement de clé.
+          errorBuilder: (_, __, ___) => _pastille(c1, c2, initiale),
+        ),
+      );
+    }
+
+    return _pastille(c1, c2, initiale);
+  }
+
+  Widget _pastille(Color c1, Color c2, String initiale) {
     return Container(
       width: size,
       height: size,

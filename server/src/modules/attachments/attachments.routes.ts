@@ -29,7 +29,8 @@ const DOWNLOAD_TTL_SECONDS = 60 * 60;
 const MAX_SIZE = 64 * 1024 * 1024;
 
 const createSchema = z.object({
-  conversationId: z.string().uuid(),
+  // Absent pour une photo de profil : elle n'appartient à aucune conversation.
+  conversationId: z.string().uuid().optional(),
   ciphertextSize: z.number().int().positive().max(MAX_SIZE),
   // Nom de fichier et type MIME sont chiffrés par le client : le serveur ne
   // stocke qu'un blob opaque de métadonnées.
@@ -41,20 +42,51 @@ export async function attachmentsRoutes(app: FastifyInstance) {
   app.post('/attachments', { preHandler: requireAuth }, async (request, reply) => {
     const body = createSchema.parse(request.body);
     const me = request.auth!;
+    const estAvatar = !body.conversationId;
 
-    await requireMembership(body.conversationId, me.userId);
+    if (body.conversationId) {
+      await requireMembership(body.conversationId, me.userId);
+    }
 
-    const storageKey = `${body.conversationId}/${randomUUID()}`;
+    const storageKey = estAvatar
+      ? `avatars/${me.userId}/${randomUUID()}`
+      : `${body.conversationId}/${randomUUID()}`;
     const metadata = Buffer.from(body.encryptedMetadata, 'base64');
+
+    // Une photo de profil remplace la précédente : sans cette suppression, tout
+    // changement d'avatar laisserait un objet chiffré de plus chez l'hébergeur,
+    // pour toujours et sans plus rien pour le retrouver.
+    if (estAvatar) {
+      const anciennes = await prisma.attachmentRef.findMany({
+        where: { ownerUserId: me.userId },
+        select: { id: true, storageKey: true },
+      });
+      for (const ancienne of anciennes) {
+        try {
+          await requireStorage().send(
+            new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: ancienne.storageKey }),
+          );
+        } catch {
+          // L'objet a pu disparaître d'un autre côté : on efface la ligne
+          // quand même, sinon elle resterait à pointer dans le vide.
+        }
+      }
+      await prisma.attachmentRef.deleteMany({ where: { ownerUserId: me.userId } });
+    }
 
     const attachment = await prisma.attachmentRef.create({
       data: {
-        conversationId: body.conversationId,
+        conversationId: body.conversationId ?? null,
+        ownerUserId: estAvatar ? me.userId : null,
         uploaderDeviceId: me.deviceId,
         storageKey,
         encryptedMetadata: new Uint8Array(metadata),
         ciphertextSize: BigInt(body.ciphertextSize),
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        // Pas d'expiration pour une photo de profil : elle vaut tant qu'elle
+        // n'est pas remplacée.
+        expiresAt: estAvatar
+          ? null
+          : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       },
     });
 
@@ -78,7 +110,17 @@ export async function attachmentsRoutes(app: FastifyInstance) {
     const attachment = await prisma.attachmentRef.findUnique({ where: { id } });
     if (!attachment) throw new HttpError(404, 'pièce jointe introuvable');
 
-    await requireMembership(attachment.conversationId, request.auth!.userId);
+    // Photo de profil : accessible à tout compte authentifié.
+    //
+    // Ce n'est pas un relâchement. L'objet est chiffré, et sa clé ne voyage que
+    // dans les messages de bout en bout : seules les personnes à qui son
+    // propriétaire l'a annoncée peuvent en faire quoi que ce soit. Exiger en
+    // plus une conversation commune n'ajouterait aucune protection, et
+    // obligerait à interroger l'appartenance pour un objet que le serveur ne
+    // sait de toute façon pas lire.
+    if (attachment.conversationId) {
+      await requireMembership(attachment.conversationId, request.auth!.userId);
+    }
 
     const downloadUrl = await getSignedUrl(
       requireStorage(),

@@ -1,8 +1,10 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/config/app_settings.dart';
 import '../../chat/data/chat_service.dart';
+import '../../chat/presentation/identity_avatar.dart';
 import '../../../core/update/update_service.dart';
 import 'devices_screen.dart';
 import 'two_factor_sheet.dart';
@@ -39,6 +41,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {
       if (mounted) setState(() => _twoFactorEnabled = null);
     }
+  }
+
+  /// Choisit une image et la publie comme photo de profil.
+  ///
+  /// Même repli que pour les pièces jointes : le sélecteur graphique passe par
+  /// le portail XDG, absent de certains environnements. Plutôt que de rester
+  /// inerte, on demande le chemin.
+  Future<void> _choisirPhoto() async {
+    String? chemin;
+    try {
+      final res = await FilePicker.pickFiles(withData: false);
+      chemin = res?.files.single.path;
+    } catch (_) {
+      chemin = await _demanderChemin();
+    }
+    if (chemin == null || chemin.isEmpty) return;
+    await widget.service.definirAvatar(chemin);
+    if (!mounted) return;
+    final err = widget.service.error;
+    if (err != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(err)));
+    }
+  }
+
+  Future<String?> _demanderChemin() async {
+    final ctrl = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Photo de profil'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Chemin de l’image',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+              child: const Text('Valider')),
+        ],
+      ),
+    );
   }
 
   @override
@@ -115,6 +167,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const Divider(height: 32),
           _section(theme, 'Compte'),
+          // Écoute le service : sans ça, la photo qu'on vient de choisir ne
+          // s'affiche qu'au prochain passage sur cet écran — on croit que
+          // l'enregistrement a échoué alors qu'il a réussi.
+          ListenableBuilder(
+            listenable: s,
+            builder: (context, _) => ListTile(
+              leading: IdentityAvatar(
+                label: s.username ?? '?',
+                photo: s.photoDe(s.userId),
+                size: 40,
+              ),
+              title: const Text('Photo de profil'),
+              subtitle: Text(s.busy
+                  ? 'Chiffrement et envoi…'
+                  : 'Chiffrée comme un message : le serveur ne la voit pas'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: s.busy ? null : _choisirPhoto,
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.person_outline),
             title: const Text('Nom d’utilisateur'),

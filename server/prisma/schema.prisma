@@ -56,6 +56,8 @@ model User {
   participants         ConversationParticipant[]
   authSessions         AuthSession[]
 
+  avatars AttachmentRef[] @relation("AvatarOwner")
+
   @@map("users")
 }
 
@@ -203,8 +205,18 @@ model MessageReceipt {
 }
 
 model AttachmentRef {
-  id                String    @id @default(uuid()) @db.Uuid
-  conversationId    String    @map("conversation_id") @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
+
+  // Nullable depuis l'arrivée des photos de profil : un avatar n'appartient à
+  // aucune conversation. Laisser ce champ obligatoire aurait imposé de rattacher
+  // la photo à une conversation arbitraire, qui l'aurait emportée en
+  // disparaissant et l'aurait fait expirer au bout de trente jours.
+  conversationId String? @map("conversation_id") @db.Uuid
+
+  // Renseigné à la place, pour les pièces jointes de profil. Le compte supprimé,
+  // sa photo l'est aussi.
+  ownerUserId String? @map("owner_user_id") @db.Uuid
+
   uploaderDeviceId  String    @map("uploader_device_id") @db.Uuid
   storageKey        String    @map("storage_key")
   encryptedMetadata Bytes     @map("encrypted_metadata")
@@ -212,7 +224,8 @@ model AttachmentRef {
   createdAt         DateTime  @default(now()) @map("created_at")
   expiresAt         DateTime? @map("expires_at")
 
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  owner        User?         @relation("AvatarOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
 
   @@map("attachment_refs")
 }

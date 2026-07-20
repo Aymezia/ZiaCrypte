@@ -460,6 +460,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         label: c.peerUsername,
                         identityKey: _cleDuPair(c),
                         isGroup: c.isGroup,
+                        photo: s.photoDe(c.peerUserId),
                       ),
                       title: Text(c.peerUsername,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -703,6 +704,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           identityKey: _cleDuPair(conv),
                           size: 30,
                           isGroup: conv.isGroup,
+                          photo: widget.service.photoDe(conv.peerUserId),
                         )
                       : null,
                 ),
