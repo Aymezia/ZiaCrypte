@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/config/app_settings.dart';
@@ -192,16 +191,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 'Le serveur ne relaie que du chiffré. Il ne détient aucune '
                 'clé privée et ne peut lire aucun message.'),
           ),
+          // L'adresse du serveur n'est plus affichée.
+          //
+          // À ne pas confondre avec du secret : elle reste lisible dans le
+          // binaire (un `strings` la donne) et visible dans le trafic réseau de
+          // n'importe quel appareil. Ce que ça change réellement, c'est qu'elle
+          // ne s'expose plus d'elle-même sur une capture d'écran partagée ou
+          // par-dessus l'épaule.
           ListTile(
             leading: const Icon(Icons.dns_outlined),
-            title: const Text('Serveur'),
-            subtitle: Text(AppConfig.serverUrl),
-            onTap: () {
-              Clipboard.setData(ClipboardData(text: AppConfig.serverUrl));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Adresse copiée')),
-              );
-            },
+            title: const Text('Connexion'),
+            subtitle: Text(AppConfig.isInsecureTransport
+                ? 'Liaison NON chiffrée vers le serveur'
+                : 'Liaison chiffrée (TLS) vers le serveur'),
           ),
           const SizedBox(height: 24),
         ],

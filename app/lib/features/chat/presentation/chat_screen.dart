@@ -11,6 +11,7 @@ import '../../settings/presentation/settings_screen.dart';
 import '../../settings/presentation/update_sheet.dart';
 import '../data/chat_service.dart';
 import 'identity_avatar.dart';
+import 'media_bubble.dart';
 import 'search_sheet.dart';
 import 'verification_sheet.dart';
 import 'voice_message_bubble.dart';
@@ -1054,6 +1055,19 @@ class _ChatScreenState extends State<ChatScreen> {
     final color = m.mine
         ? theme.colorScheme.onPrimaryContainer
         : theme.colorScheme.onSurface;
+
+    // Photos et vidéos se montrent dans le fil. Obliger à télécharger pour
+    // savoir ce qu'on a reçu est le comportement d'un client de courriel, pas
+    // d'une messagerie. Le type se déduit du nom de fichier — qui voyage
+    // chiffré : le serveur ignore toujours ce qu'il relaie.
+    if (typeDe(ref.fileName) != TypeMedia.fichier) {
+      return MediaBubble(
+          key: ValueKey('media-${ref.id}'),
+          service: widget.service,
+          attachment: ref,
+          mine: m.mine);
+    }
+
     return InkWell(
       onTap: () => _openAttachment(ref),
       child: Row(

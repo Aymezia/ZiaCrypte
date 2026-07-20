@@ -1312,6 +1312,24 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Télécharge et déchiffre une pièce jointe, sans jamais toucher le disque.
+  ///
+  /// Sert à l'aperçu des images dans le fil. Écrire une photo déchiffrée dans
+  /// un dossier temporaire la ferait survivre à l'application, échapper au
+  /// chiffrement du coffre et entrer dans les sauvegardes du système — pour un
+  /// affichage qui n'a besoin que de la mémoire.
+  Future<Uint8List> telechargerEnMemoire(AttachmentRef ref) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) {
+      throw StateError('Session fermée : reconnecte-toi.');
+    }
+    final info = await api.attachment(ref.id);
+    final ciphertext =
+        await api.downloadFromStorage(info['downloadUrl'] as String);
+    return gateway.attachmentDecrypt(base64Decode(ref.keyBase64), ciphertext);
+  }
+
   /// Télécharge et déchiffre une pièce jointe EN MÉMOIRE, puis l'écrit dans un
   /// fichier temporaire — pour la lecture d'un vocal sans l'exposer en clair
   /// dans un dossier de l'utilisateur.
