@@ -71,7 +71,9 @@ jobs:
         run: |
           flutter config --enable-windows-desktop
           flutter pub get
-          flutter build windows --release --dart-define=ZIA_SERVER_URL=$env:ZIA_SERVER_URL
+          $ver = (Select-String -Path pubspec.yaml -Pattern '^version:' | Select-Object -First 1).Line -replace '^version:\s*','' -replace '\+.*$',''
+          Write-Host "version : $ver"
+          flutter build windows --release --dart-define=ZIA_SERVER_URL=$env:ZIA_SERVER_URL --dart-define=ZIA_VERSION=$ver
 
       - name: Assemble bundle
         shell: pwsh
@@ -125,7 +127,9 @@ jobs:
         run: |
           flutter config --enable-macos-desktop
           flutter pub get
-          flutter build macos --release --dart-define=ZIA_SERVER_URL=$ZIA_SERVER_URL
+          ver=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)
+          echo "version : $ver"
+          flutter build macos --release --dart-define=ZIA_SERVER_URL=$ZIA_SERVER_URL --dart-define=ZIA_VERSION=$ver
 
       - name: Assemble bundle
         run: |

@@ -1,7 +1,7 @@
 name: ziacrypte
 description: Application de messagerie chiffrée ZiaCrypte
 publish_to: 'none'
-version: 0.1.0
+version: 0.8.1
 
 environment:
   sdk: '>=3.5.0 <4.0.0'

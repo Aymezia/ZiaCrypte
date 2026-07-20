@@ -18,6 +18,22 @@ class AppConfig {
     defaultValue: 'http://127.0.0.1:3210',
   );
 
+  /// Version de cette compilation, au format x.y.z.
+  ///
+  /// Posée par les scripts d'empaquetage depuis pubspec.yaml. Le vérificateur
+  /// de mise à jour la compare à la dernière version publiée ; sans elle il ne
+  /// saurait pas s'il est à jour.
+  static const String version = String.fromEnvironment(
+    'ZIA_VERSION',
+    defaultValue: '0.0.0-dev',
+  );
+
+  /// Dépôt consulté pour les mises à jour.
+  static const String updateRepo = String.fromEnvironment(
+    'ZIA_UPDATE_REPO',
+    defaultValue: 'Aymezia/ZiaCrypte',
+  );
+
   /// Affiche le champ « adresse du serveur » (pratique en développement).
   ///   --dart-define=ZIA_ALLOW_SERVER_OVERRIDE=true
   static const bool allowServerOverride = bool.fromEnvironment(

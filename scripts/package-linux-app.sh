@@ -59,7 +59,13 @@ echo ">> Compilation de l'application Flutter"
 # Adresse du serveur intégrée au binaire : l'utilisateur n'a rien à saisir.
 ZIA_SERVER_URL="${ZIA_SERVER_URL:-https://51.83.199.103.nip.io}"
 echo "   serveur intégré : $ZIA_SERVER_URL"
-(cd "$APP" && flutter build linux --release --dart-define=ZIA_SERVER_URL="$ZIA_SERVER_URL")
+# La version vient de pubspec.yaml : une seule source de vérité, et le
+# vérificateur de mise à jour peut se comparer à la dernière release.
+ZIA_VERSION="$(grep -m1 '^version:' "$APP/pubspec.yaml" | sed 's/version: *//' | cut -d+ -f1)"
+echo "   version : $ZIA_VERSION"
+(cd "$APP" && flutter build linux --release \
+  --dart-define=ZIA_SERVER_URL="$ZIA_SERVER_URL" \
+  --dart-define=ZIA_VERSION="$ZIA_VERSION")
 
 echo ">> Assemblage"
 rm -rf "$DIST"
