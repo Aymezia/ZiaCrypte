@@ -746,6 +746,24 @@ class ChatService extends ChangeNotifier {
   /// Chiffre un fichier, le dépose sur le stockage objet, puis envoie sa
   /// référence et sa clé dans un message chiffré de bout en bout.
   Future<void> sendAttachment(String filePath) async {
+    final bytes = await File(filePath).readAsBytes();
+    final fileName = filePath.split(Platform.pathSeparator).last;
+    await _uploadAndSend(bytes, fileName, label: '📎 $fileName');
+  }
+
+  /// Envoie un message vocal : mêmes chiffrement et transport qu'une pièce
+  /// jointe (chemin déjà éprouvé), avec une durée qui voyage dans le message
+  /// chiffré. L'octet audio ne touche le réseau que chiffré.
+  Future<void> sendVoiceMessage(String filePath, int durationMs) async {
+    final bytes = await File(filePath).readAsBytes();
+    final fileName = filePath.split(Platform.pathSeparator).last;
+    await _uploadAndSend(bytes, fileName,
+        label: '🎤 Message vocal', voiceDurationMs: durationMs);
+  }
+
+  /// Chiffre, dépose et annonce une pièce jointe (fichier ou vocal).
+  Future<void> _uploadAndSend(Uint8List bytes, String fileName,
+      {required String label, int? voiceDurationMs}) async {
     final conv = active;
     final api = _api;
     final gateway = _gateway;
@@ -753,10 +771,6 @@ class ChatService extends ChangeNotifier {
 
     _setBusy(true);
     try {
-      final file = File(filePath);
-      final bytes = await file.readAsBytes();
-      final fileName = filePath.split(Platform.pathSeparator).last;
-
       // Le fichier et son nom sont chiffrés séparément : l'hébergeur du
       // stockage ne voit ni l'un ni l'autre.
       final sealed = await gateway.attachmentEncrypt(bytes);
@@ -776,11 +790,35 @@ class ChatService extends ChangeNotifier {
         keyBase64: base64Encode(sealed.key),
         fileName: fileName,
         size: bytes.length,
+        voiceDurationMs: voiceDurationMs,
       );
-      await _sendPayload('📎 $fileName', ref);
+      await _sendPayload(label, ref);
       _setBusy(false);
     } catch (e) {
       _setBusy(false, err: _humanize(e));
+    }
+  }
+
+  /// Télécharge et déchiffre une pièce jointe EN MÉMOIRE, puis l'écrit dans un
+  /// fichier temporaire — pour la lecture d'un vocal sans l'exposer en clair
+  /// dans un dossier de l'utilisateur.
+  Future<String?> materializeForPlayback(AttachmentRef ref) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return null;
+    try {
+      final info = await api.attachment(ref.id);
+      final ciphertext =
+          await api.downloadFromStorage(info['downloadUrl'] as String);
+      final plain = await gateway.attachmentDecrypt(
+          base64Decode(ref.keyBase64), ciphertext);
+
+      final dir = await Directory.systemTemp.createTemp('zia_voice');
+      final out = File('${dir.path}${Platform.pathSeparator}${ref.fileName}');
+      await out.writeAsBytes(plain);
+      return out.path;
+    } catch (_) {
+      return null;
     }
   }
 

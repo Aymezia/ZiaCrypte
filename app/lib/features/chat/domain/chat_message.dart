@@ -63,6 +63,7 @@ class AttachmentRef {
     required this.keyBase64,
     required this.fileName,
     required this.size,
+    this.voiceDurationMs,
   });
 
   final String id;
@@ -70,13 +71,25 @@ class AttachmentRef {
   final String fileName;
   final int size;
 
-  Map<String, Object?> toJson() =>
-      {'id': id, 'k': keyBase64, 'n': fileName, 's': size};
+  /// Durée en millisecondes si c'est un message vocal ; null pour un fichier.
+  /// Voyage dans le message chiffré : le serveur ne l'apprend pas.
+  final int? voiceDurationMs;
+
+  bool get isVoice => voiceDurationMs != null;
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'k': keyBase64,
+        'n': fileName,
+        's': size,
+        if (voiceDurationMs != null) 'vd': voiceDurationMs,
+      };
 
   static AttachmentRef fromJson(Map<String, Object?> json) => AttachmentRef(
         id: json['id'] as String,
         keyBase64: json['k'] as String,
         fileName: json['n'] as String,
         size: (json['s'] as num).toInt(),
+        voiceDurationMs: (json['vd'] as num?)?.toInt(),
       );
 }

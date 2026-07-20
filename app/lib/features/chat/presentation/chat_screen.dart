@@ -7,6 +7,8 @@ import '../../../core/config/app_settings.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../data/chat_service.dart';
 import 'verification_sheet.dart';
+import 'voice_message_bubble.dart';
+import 'voice_recorder_button.dart';
 
 /// Écran principal : liste des conversations à gauche, conversation active à
 /// droite. Sur fenêtre étroite, la liste et la conversation s'alternent.
@@ -664,7 +666,12 @@ class _ChatScreenState extends State<ChatScreen> {
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: m.hasAttachment
-                                ? _attachmentBubble(theme, m)
+                                ? (m.attachment!.isVoice
+                                    ? VoiceMessageBubble(
+                                        service: widget.service,
+                                        attachment: m.attachment!,
+                                        mine: m.mine)
+                                    : _attachmentBubble(theme, m))
                                 : Text(
                                     m.text,
                                     style: TextStyle(
@@ -697,6 +704,11 @@ class _ChatScreenState extends State<ChatScreen> {
                           width: 18,
                           child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.attach_file_rounded),
+                ),
+                VoiceRecorderButton(
+                  enabled: conv.ready && !s.busy,
+                  onRecorded: (path, durationMs) =>
+                      widget.service.sendVoiceMessage(path, durationMs),
                 ),
                 Expanded(
                   child: TextField(

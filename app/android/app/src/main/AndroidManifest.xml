@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Nécessaire pour joindre le serveur de relais. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Enregistrement des messages vocaux. Demandée à l'exécution par le
+         paquet record ; sans cette déclaration, l'enregistrement échoue. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="ziacrypte"
         android:name="${applicationName}"
