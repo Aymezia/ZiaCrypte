@@ -193,7 +193,7 @@ class ChatService extends ChangeNotifier {
       ));
       _setBusy(false);
     } catch (e) {
-      _setBusy(false, err: _humanize(e));
+      _setBusy(false, err: _humanize(e, auth: _AuthKind.creation));
       rethrow;
     }
   }
@@ -251,7 +251,7 @@ class ChatService extends ChangeNotifier {
             err: 'Entre le code de ton application d’authentification.');
         return;
       }
-      _setBusy(false, err: _humanize(e));
+      _setBusy(false, err: _humanize(e, auth: _AuthKind.compteExistant));
       rethrow;
     }
   }
@@ -283,7 +283,7 @@ class ChatService extends ChangeNotifier {
             err: 'Entre le code de ton application d’authentification.');
         return;
       }
-      _setBusy(false, err: _humanize(e));
+      _setBusy(false, err: _humanize(e, auth: _AuthKind.reconnexion));
       rethrow;
     }
   }
@@ -1349,9 +1349,35 @@ class ChatService extends ChangeNotifier {
 
   /// Traduit une erreur technique en phrase compréhensible. Afficher une
   /// exception brute à l'utilisateur n'apprend rien à personne.
-  String _humanize(Object e) {
+  /// Traduit une erreur pour l'utilisateur.
+  ///
+  /// [auth] change le sens de plusieurs codes. Sur une CONNEXION, un 401 veut
+  /// dire « identifiants incorrects », pas « session expirée » — dire à
+  /// quelqu'un qui essaie de se connecter que sa session a expiré n'a aucun
+  /// sens et l'envoie chercher un problème inexistant.
+  String _humanize(Object e, {_AuthKind auth = _AuthKind.aucun}) {
     if (e is DioException) {
       final code = e.response?.statusCode;
+
+      if (auth != _AuthKind.aucun) {
+        switch (code) {
+          case 401:
+            return 'Nom d’utilisateur ou mot de passe incorrect.';
+          case 404:
+            return auth == _AuthKind.reconnexion
+                ? 'Cet appareil n’est plus reconnu par le serveur. '
+                    'Utilise « J’ai déjà un compte ailleurs » pour le rattacher.'
+                : 'Ce compte n’existe pas.';
+          case 409:
+            return auth == _AuthKind.creation
+                ? 'Ce nom d’utilisateur est déjà pris.'
+                : 'Cet appareil ne peut pas rejoindre ce compte : sa clé '
+                    'd’identité est déjà utilisée.';
+          case 429:
+            return 'Trop de tentatives. Réessaie dans quelques minutes.';
+        }
+      }
+
       switch (code) {
         case 400:
           return 'Requête refusée par le serveur.';
@@ -1365,6 +1391,10 @@ class ChatService extends ChangeNotifier {
           return 'Ce nom d’utilisateur est déjà pris.';
         case 413:
           return 'Fichier trop volumineux.';
+        case 429:
+          return 'Trop de requêtes. Réessaie dans un instant.';
+        case 503:
+          return 'Fonction indisponible sur ce serveur.';
       }
       if (e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.connectionError) {
@@ -1390,3 +1420,11 @@ class ChatService extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Contexte d'une erreur d'authentification, pour en traduire le sens.
+///
+/// Les mêmes codes HTTP ne veulent pas dire la même chose selon l'action : un
+/// 401 sur une connexion signale de mauvais identifiants, pas une session
+/// expirée ; un 409 signale un pseudo pris à la création, mais une clé
+/// d'identité déjà utilisée à l'ajout d'un appareil.
+enum _AuthKind { aucun, creation, reconnexion, compteExistant }
