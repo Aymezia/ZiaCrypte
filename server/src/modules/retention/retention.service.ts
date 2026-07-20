@@ -58,17 +58,22 @@ export async function purgeExpired(
   // resterait chez l'hébergeur indéfiniment. On efface donc l'objet d'abord, et
   // on ne retire la ligne qu'en cas de succès — un échec laisse la ligne en
   // place pour être retentée au prochain passage.
-  const perimees = await prisma.attachmentRef.findMany({
-    where: { expiresAt: { lt: maintenant } },
-    select: { id: true, storageKey: true },
-    take: 500,
-  });
+  // Sans stockage configuré, on ne peut pas supprimer les objets : on laisse
+  // les lignes en place plutôt que de les orpheliner définitivement.
+  const perimees =
+    s3 === null
+      ? []
+      : await prisma.attachmentRef.findMany({
+          where: { expiresAt: { lt: maintenant } },
+          select: { id: true, storageKey: true },
+          take: 500,
+        });
 
   let piecesJointes = 0;
   let piecesJointesEchouees = 0;
   for (const piece of perimees) {
     try {
-      await s3.send(
+      await s3!.send(
         new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: piece.storageKey }),
       );
       await prisma.attachmentRef.delete({ where: { id: piece.id } });

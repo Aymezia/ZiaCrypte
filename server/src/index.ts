@@ -4,6 +4,7 @@ import { prisma } from './db/prisma.js';
 import { buildPushProviders } from './modules/push/push.bootstrap.js';
 import { initPush } from './modules/push/push.service.js';
 import { schedulePurge } from './modules/retention/retention.service.js';
+import { storageConfigured } from './lib/storage.js';
 import { initGateway } from './ws/gateway.js';
 
 const app = await buildApp();
@@ -12,6 +13,13 @@ app.ready().then(() => {
   initGateway(app.server);
   initPush(buildPushProviders((msg) => app.log.info(msg)));
   schedulePurge((msg) => app.log.info(msg));
+  // Comme pour le push : une dépendance optionnelle absente doit se voir au
+  // démarrage, pas se découvrir au premier échec d'un utilisateur.
+  if (!storageConfigured) {
+    app.log.warn(
+      'stockage objet non configuré : pièces jointes et messages vocaux indisponibles',
+    );
+  }
 });
 
 app.listen({ port: env.PORT, host: env.HOST }).catch(async (err) => {

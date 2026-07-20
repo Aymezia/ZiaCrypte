@@ -19,11 +19,15 @@ const schema = z.object({
 
   // Stockage objet des pièces jointes (API S3 : MinIO auto-hébergé ici, mais
   // Cloudflare R2 ou Backblaze B2 conviennent en changeant l'endpoint).
-  S3_ENDPOINT: z.string().url(),
+  // OPTIONNEL. Sans stockage objet configuré, le serveur démarre quand même :
+  // seules les pièces jointes et les messages vocaux sont indisponibles, et il
+  // le dit au démarrage. Exiger ces variables empêchait de faire tourner — ou
+  // simplement de tester — un serveur qui n'en a pas besoin.
+  S3_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().default('us-east-1'),
   S3_BUCKET: z.string().default('ziacrypte-attachments'),
-  S3_ACCESS_KEY: z.string().min(3),
-  S3_SECRET_KEY: z.string().min(8),
+  S3_ACCESS_KEY: z.string().min(3).optional(),
+  S3_SECRET_KEY: z.string().min(8).optional(),
 
   // Notifications push. Optionnel : sans compte de service Firebase, le serveur
   // démarre avec un fournisseur inerte et le signale au démarrage. La remise

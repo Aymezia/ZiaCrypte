@@ -8,7 +8,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireMembership } from '../conversations/membership.js';
-import { s3 } from '../../lib/storage.js';
+import { requireStorage } from '../../lib/storage.js';
 import { env } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
@@ -59,7 +59,7 @@ export async function attachmentsRoutes(app: FastifyInstance) {
     });
 
     const uploadUrl = await getSignedUrl(
-      s3,
+      requireStorage(),
       new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: storageKey }),
       { expiresIn: UPLOAD_TTL_SECONDS },
     );
@@ -81,7 +81,7 @@ export async function attachmentsRoutes(app: FastifyInstance) {
     await requireMembership(attachment.conversationId, request.auth!.userId);
 
     const downloadUrl = await getSignedUrl(
-      s3,
+      requireStorage(),
       new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: attachment.storageKey }),
       { expiresIn: DOWNLOAD_TTL_SECONDS },
     );
@@ -104,7 +104,7 @@ export async function attachmentsRoutes(app: FastifyInstance) {
       throw new HttpError(403, 'seul l’émetteur peut supprimer cette pièce jointe');
     }
 
-    await s3.send(
+    await requireStorage().send(
       new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: attachment.storageKey }),
     );
     await prisma.attachmentRef.delete({ where: { id } });
