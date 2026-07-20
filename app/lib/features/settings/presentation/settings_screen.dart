@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/config/app_settings.dart';
 import '../../chat/data/chat_service.dart';
+import '../../../core/update/update_service.dart';
 import 'two_factor_sheet.dart';
+import 'update_sheet.dart';
 
 /// Écran d'options : apparence, compte, sécurité, à propos.
 class SettingsScreen extends StatefulWidget {
@@ -130,6 +132,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () {
               s.logout();
               Navigator.of(context).pop();
+            },
+          ),
+
+          const Divider(height: 32),
+          _section(theme, 'Application'),
+          ListTile(
+            leading: const Icon(Icons.system_update_alt),
+            title: const Text('Mise à jour'),
+            subtitle: Text('Version ${AppConfig.version}'
+                '${UpdateService.signingConfigured ? '' : ' — vérification de signature non configurée'}'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              final engine = widget.service.engine;
+              if (engine == null) return;
+              UpdateSheet.show(context, UpdateService(engine));
             },
           ),
 

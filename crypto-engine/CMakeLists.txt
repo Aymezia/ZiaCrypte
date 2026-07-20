@@ -39,4 +39,5 @@ option(ZIA_BUILD_TESTS "Compiler les tests unitaires du crypto-engine" OFF)
 if(ZIA_BUILD_TESTS)
     enable_testing() # requis pour que ctest découvre les add_test() des sous-répertoires
     add_subdirectory(tests)
+add_subdirectory(tools)
 endif()

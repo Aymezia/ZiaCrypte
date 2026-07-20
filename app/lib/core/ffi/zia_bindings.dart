@@ -175,6 +175,10 @@ class ZiaBindings {
                 Pointer<Pointer<Uint8>>, Pointer<Size>),
             int Function(Pointer<Uint8>, Pointer<Uint8>, int,
                 Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_attachment_decrypt'),
+        verifyFileSignature = lib.lookupFunction<
+            Int32 Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>),
+            int Function(Pointer<Uint8>, Pointer<Char>,
+                Pointer<Uint8>)>('zia_verify_file_signature'),
         safetyNumber = lib.lookupFunction<
             Int32 Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,
                 Pointer<Char>, Pointer<Char>),
@@ -226,6 +230,10 @@ class ZiaBindings {
       Pointer<Pointer<Uint8>>, Pointer<Size>) attachmentEncrypt;
   final int Function(Pointer<Uint8>, Pointer<Uint8>, int,
       Pointer<Pointer<Uint8>>, Pointer<Size>) attachmentDecrypt;
+
+  /// Vérifie la signature détachée d'un fichier (mise à jour).
+  final int Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>)
+      verifyFileSignature;
 
   /// Empreinte des deux clés d'identité (60 chiffres + octet nul).
   final int Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,

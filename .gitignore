@@ -54,3 +54,6 @@ app/android/app/src/main/jniLibs/
 # Corpus et journaux de fuzzing (régénérés, jamais versionnés)
 crypto-engine/build/fuzz-corpus/
 crypto-engine/crash-*
+
+# Clés de signature des releases : JAMAIS versionnées
+*.key

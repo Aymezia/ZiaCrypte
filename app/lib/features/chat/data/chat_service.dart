@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/config/app_storage.dart';
+import '../../../core/ffi/crypto_isolate.dart';
 import '../../../core/ffi/zia_crypto_exceptions.dart';
 import '../../../core/network/api_client.dart';
 import '../domain/chat_message.dart';
@@ -63,6 +64,10 @@ class ChatService extends ChangeNotifier {
 
   /// Passe le second facteur au client REST courant (écran d'options).
   ApiClient? get api => _api;
+
+  /// Moteur natif, pour les composants qui en ont besoin directement
+  /// (vérification de signature des mises à jour). Null hors session.
+  ZiaCryptoEngine? get engine => _gateway?.engine;
 
   bool get connected => userId != null;
 

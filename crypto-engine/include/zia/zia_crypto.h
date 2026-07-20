@@ -111,6 +111,15 @@ ZIA_API ZiaStatus zia_session_decrypt(ZiaSession* session,
 ZIA_API ZiaStatus zia_attachment_encrypt(const uint8_t* plaintext, size_t plaintext_len,
                                          uint8_t out_key[ZIA_ATTACHMENT_KEY_LEN],
                                          uint8_t** out_ciphertext, size_t* out_len);
+/* ---- Mise à jour signée ----
+ *
+ * Vérifie qu'un fichier téléchargé a bien été signé par la clé attendue.
+ * Le hachage se fait EN FLUX : un artefact de plusieurs dizaines de Mo n'est
+ * jamais chargé entièrement en mémoire. `signature` est détachée (Ed25519). */
+ZIA_API ZiaStatus zia_verify_file_signature(const uint8_t public_key[ZIA_PUBLIC_KEY_LEN],
+                                            const char* path,
+                                            const uint8_t signature[ZIA_SIGNATURE_LEN]);
+
 /* ---- Vérification de contact ----
  *
  * Empreinte des deux clés d'identité, à comparer hors bande (de vive voix, QR).

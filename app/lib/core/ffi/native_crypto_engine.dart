@@ -318,6 +318,31 @@ class NativeCryptoEngine {
     }
   }
 
+  // ---- Mise à jour signée ----
+
+  /// Vrai si [filePath] porte bien la signature de [publicKey].
+  ///
+  /// Le hachage se fait en flux dans le moteur : un artefact de plusieurs
+  /// dizaines de mégaoctets n'est jamais chargé en mémoire côté Dart, et
+  /// aucune cryptographie n'y est faite.
+  bool verifyFileSignature({
+    required Uint8List publicKey,
+    required String filePath,
+    required Uint8List signature,
+  }) {
+    final pk = _toNative(publicKey);
+    final sig = _toNative(signature);
+    final path = filePath.toNativeUtf8();
+    try {
+      final status = _b.verifyFileSignature(pk, path.cast<Char>(), sig);
+      return status == 0; // ZIA_OK
+    } finally {
+      calloc.free(pk);
+      calloc.free(sig);
+      malloc.free(path);
+    }
+  }
+
   // ---- Vérification de contact ----
 
   /// Empreinte à 60 chiffres des deux clés d'identité.

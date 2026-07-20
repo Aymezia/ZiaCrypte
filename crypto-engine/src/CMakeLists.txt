@@ -10,6 +10,7 @@ add_library(zia_crypto SHARED
     vault.cpp
     attachment.cpp
     safety_number.cpp
+    release_signature.cpp
 )
 
 target_include_directories(zia_crypto

@@ -95,6 +95,18 @@ class ZiaCryptoEngine {
         'ri': remoteId,
       });
 
+  /// Vérifie la signature détachée d'un fichier de mise à jour.
+  Future<bool> verifyFileSignature({
+    required Uint8List publicKey,
+    required String filePath,
+    required Uint8List signature,
+  }) =>
+      _call('verifyFileSignature', {
+        'pk': publicKey,
+        'path': filePath,
+        'sig': signature,
+      });
+
   /// Range une donnée chiffrée dans le coffre local de l'appareil.
   Future<void> vaultWrite(String name, Uint8List data) =>
       _call('vaultWrite', {'name': name, 'data': data});
@@ -223,6 +235,12 @@ class ZiaCryptoEngine {
           localId: a['li'] as String,
           remoteKey: a['rk'] as Uint8List,
           remoteId: a['ri'] as String,
+        );
+      case 'verifyFileSignature':
+        return engine.verifyFileSignature(
+          publicKey: a['pk'] as Uint8List,
+          filePath: a['path'] as String,
+          signature: a['sig'] as Uint8List,
         );
       case 'vaultWrite':
         engine.vaultWrite(a['name'] as String, a['data'] as Uint8List);

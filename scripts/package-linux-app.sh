@@ -32,7 +32,7 @@ g++ -std=c++20 -O2 -DNDEBUG -fPIC -shared \
   "$ENGINE/src/primitives/primitives.cpp" \
   "$ENGINE/src/storage/identity_store.cpp" \
   "$ENGINE/src/storage/secure_blob.cpp" "$ENGINE/src/vault.cpp" \
-  "$ENGINE/src/attachment.cpp" "$ENGINE/src/safety_number.cpp" \
+  "$ENGINE/src/attachment.cpp" "$ENGINE/src/safety_number.cpp" "$ENGINE/src/release_signature.cpp" \
   "$ENGINE/platform/linux/secure_key_store_linux.cpp" \
   -o "$TMP_SO" \
   -Wl,--exclude-libs,ALL "$SODIUM_A" $(pkg-config --libs libsecret-1)
@@ -61,11 +61,16 @@ ZIA_SERVER_URL="${ZIA_SERVER_URL:-https://51.83.199.103.nip.io}"
 echo "   serveur intégré : $ZIA_SERVER_URL"
 # La version vient de pubspec.yaml : une seule source de vérité, et le
 # vérificateur de mise à jour peut se comparer à la dernière release.
+# Clé publique de signature des releases. Intégrée au binaire : c'est elle qui
+# décide quel code l'application acceptera d'installer. La clé privée
+# correspondante reste hors de toute machine publique.
+ZIA_UPDATE_PUBKEY="${ZIA_UPDATE_PUBKEY:-ovIl8hVTU9GEtjODO3Pp9HaF5QCXx+jTiZKzM2xVuN4=}"
 ZIA_VERSION="$(grep -m1 '^version:' "$APP/pubspec.yaml" | sed 's/version: *//' | cut -d+ -f1)"
 echo "   version : $ZIA_VERSION"
 (cd "$APP" && flutter build linux --release \
   --dart-define=ZIA_SERVER_URL="$ZIA_SERVER_URL" \
-  --dart-define=ZIA_VERSION="$ZIA_VERSION")
+  --dart-define=ZIA_VERSION="$ZIA_VERSION" \
+  --dart-define=ZIA_UPDATE_PUBKEY="$ZIA_UPDATE_PUBKEY")
 
 echo ">> Assemblage"
 rm -rf "$DIST"

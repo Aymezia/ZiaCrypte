@@ -13,6 +13,8 @@ permissions:
 
 env:
   ZIA_SERVER_URL: https://51.83.199.103.nip.io
+  # Clé publique de vérification des mises à jour (la privée reste hors CI).
+  ZIA_UPDATE_PUBKEY: ovIl8hVTU9GEtjODO3Pp9HaF5QCXx+jTiZKzM2xVuN4=
 
 on:
   workflow_dispatch:
@@ -73,7 +75,7 @@ jobs:
           flutter pub get
           $ver = (Select-String -Path pubspec.yaml -Pattern '^version:' | Select-Object -First 1).Line -replace '^version:\s*','' -replace '\+.*$',''
           Write-Host "version : $ver"
-          flutter build windows --release --dart-define=ZIA_SERVER_URL=$env:ZIA_SERVER_URL --dart-define=ZIA_VERSION=$ver
+          flutter build windows --release --dart-define=ZIA_SERVER_URL=$env:ZIA_SERVER_URL --dart-define=ZIA_VERSION=$ver --dart-define=ZIA_UPDATE_PUBKEY=$env:ZIA_UPDATE_PUBKEY
 
       - name: Assemble bundle
         shell: pwsh
@@ -129,7 +131,7 @@ jobs:
           flutter pub get
           ver=$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//' | cut -d+ -f1)
           echo "version : $ver"
-          flutter build macos --release --dart-define=ZIA_SERVER_URL=$ZIA_SERVER_URL --dart-define=ZIA_VERSION=$ver
+          flutter build macos --release --dart-define=ZIA_SERVER_URL=$ZIA_SERVER_URL --dart-define=ZIA_VERSION=$ver --dart-define=ZIA_UPDATE_PUBKEY=$ZIA_UPDATE_PUBKEY
 
       - name: Assemble bundle
         run: |
