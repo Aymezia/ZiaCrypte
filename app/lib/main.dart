@@ -11,7 +11,11 @@ void main() {
 }
 
 class ZiaCrypteApp extends StatefulWidget {
-  const ZiaCrypteApp({super.key});
+  const ZiaCrypteApp({super.key, this.settingsOverride});
+
+  /// Préférences injectées par les tests. En production, elles sont lues sur
+  /// le disque : un test ne doit pas dépendre de ce qui s'y trouve.
+  final AppSettings? settingsOverride;
 
   @override
   State<ZiaCrypteApp> createState() => _ZiaCrypteAppState();
@@ -19,7 +23,8 @@ class ZiaCrypteApp extends StatefulWidget {
 
 class _ZiaCrypteAppState extends State<ZiaCrypteApp> {
   final ChatService _service = ChatService();
-  final AppSettings _settings = AppSettings.load();
+  late final AppSettings _settings =
+      widget.settingsOverride ?? AppSettings.load();
 
   @override
   void dispose() {

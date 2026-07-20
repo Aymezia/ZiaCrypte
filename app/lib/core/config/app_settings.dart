@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_storage.dart';
@@ -22,6 +23,19 @@ class AppSettings extends ChangeNotifier {
   /// Les écrans d'accueil ont-ils déjà été montrés ? On ne les impose qu'une
   /// fois : les revoir à chaque lancement serait une punition, pas une aide.
   bool get onboardingVu => _onboardingVu;
+
+  /// Préférences en mémoire, pour les tests.
+  ///
+  /// Permet de choisir l'état de départ — notamment si les écrans d'accueil ont
+  /// déjà été vus — au lieu de dépendre de ce qui traîne sur le disque de la
+  /// machine qui exécute les tests.
+  @visibleForTesting
+  factory AppSettings.pourTests({
+    ThemeMode themeMode = ThemeMode.system,
+    bool enterToSend = true,
+    bool onboardingVu = true,
+  }) =>
+      AppSettings._(themeMode, enterToSend, onboardingVu);
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
