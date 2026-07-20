@@ -10,13 +10,18 @@ import 'app_storage.dart';
 /// Ne contient rien de sensible : uniquement des choix d'affichage et de confort
 /// propres à cet appareil. Les secrets restent dans le coffre chiffré du moteur.
 class AppSettings extends ChangeNotifier {
-  AppSettings._(this._themeMode, this._enterToSend);
+  AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu);
 
   ThemeMode _themeMode;
   bool _enterToSend;
+  bool _onboardingVu;
 
   ThemeMode get themeMode => _themeMode;
   bool get enterToSend => _enterToSend;
+
+  /// Les écrans d'accueil ont-ils déjà été montrés ? On ne les impose qu'une
+  /// fois : les revoir à chaque lancement serait une punition, pas une aide.
+  bool get onboardingVu => _onboardingVu;
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
@@ -30,12 +35,13 @@ class AppSettings extends ChangeNotifier {
         return AppSettings._(
           _themeFromString(json['theme'] as String?),
           json['enterToSend'] as bool? ?? true,
+          json['onboardingVu'] as bool? ?? false,
         );
       }
     } catch (_) {
       // on retombe sur les valeurs par défaut
     }
-    return AppSettings._(ThemeMode.system, true);
+    return AppSettings._(ThemeMode.system, true, false);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -52,6 +58,13 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  void marquerOnboardingVu() {
+    if (_onboardingVu) return;
+    _onboardingVu = true;
+    _save();
+    notifyListeners();
+  }
+
   void _save() {
     try {
       final dir = AppStorage.dataDirectory;
@@ -59,6 +72,7 @@ class AppSettings extends ChangeNotifier {
       _file.writeAsStringSync(jsonEncode({
         'theme': _themeMode.name,
         'enterToSend': _enterToSend,
+        'onboardingVu': _onboardingVu,
       }));
     } catch (_) {
       // écriture best-effort : une préférence non persistée n'est pas critique

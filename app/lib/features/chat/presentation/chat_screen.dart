@@ -8,6 +8,7 @@ import '../../../core/config/app_settings.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../data/chat_service.dart';
 import 'identity_avatar.dart';
+import 'search_sheet.dart';
 import 'verification_sheet.dart';
 import 'voice_message_bubble.dart';
 import 'voice_recorder_button.dart';
@@ -327,6 +328,11 @@ class _ChatScreenState extends State<ChatScreen> {
             ],
           ),
           actions: [
+            IconButton(
+              tooltip: 'Rechercher',
+              onPressed: () => SearchSheet.show(context, s),
+              icon: const Icon(Icons.search),
+            ),
             IconButton(
               tooltip: 'Nouvelle conversation',
               onPressed: s.busy ? null : _promptNewConversation,

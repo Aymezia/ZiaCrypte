@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'core/config/app_settings.dart';
 import 'features/authentication/presentation/connect_screen.dart';
+import 'features/authentication/presentation/onboarding_screen.dart';
 import 'features/chat/data/chat_service.dart';
 import 'features/chat/presentation/chat_screen.dart';
 
@@ -49,9 +50,18 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> {
         ),
         home: ListenableBuilder(
           listenable: _service,
-          builder: (context, _) => _service.connected
-              ? ChatScreen(service: _service, settings: _settings)
-              : ConnectScreen(service: _service),
+          builder: (context, _) {
+            if (_service.connected) {
+              return ChatScreen(service: _service, settings: _settings);
+            }
+            // L'accueil n'est montré qu'avant le tout premier compte : si un
+            // compte existe déjà sur cet appareil, on va droit à la connexion.
+            if (!_settings.onboardingVu && _service.savedAccount == null) {
+              return OnboardingScreen(
+                  onTermine: _settings.marquerOnboardingVu);
+            }
+            return ConnectScreen(service: _service);
+          },
         ),
       ),
     );
