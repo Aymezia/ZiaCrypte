@@ -28,9 +28,14 @@ export const s3: S3Client | null = storageConfigured
   ? new S3Client({
       endpoint: env.S3_ENDPOINT!,
       region: env.S3_REGION,
-      // Indispensable derrière un reverse proxy : sans cela le SDK viserait
-      // <bucket>.<hôte>, qui ne résout pas ici.
-      forcePathStyle: true,
+      // Indispensable derrière un reverse proxy (MinIO local) : sans cela le
+      // SDK viserait <bucket>.<hôte>, qui ne résout pas.
+      //
+      // Réglable, parce que tous les hébergeurs ne s'accommodent pas du même
+      // style d'URL. Cloudflare R2 accepte les deux ; d'autres n'acceptent que
+      // le style virtuel, et une valeur figée aurait rendu la bascule
+      // impossible sans toucher au code.
+      forcePathStyle: env.S3_FORCE_PATH_STYLE,
       credentials: {
         accessKeyId: env.S3_ACCESS_KEY!,
         secretAccessKey: env.S3_SECRET_KEY!,

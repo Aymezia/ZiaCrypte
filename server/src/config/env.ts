@@ -28,6 +28,14 @@ const schema = z.object({
   S3_BUCKET: z.string().default('ziacrypte-attachments'),
   S3_ACCESS_KEY: z.string().min(3).optional(),
   S3_SECRET_KEY: z.string().min(8).optional(),
+  // Style d'URL du stockage : chemin (https://hote/bucket/cle) ou virtuel
+  // (https://bucket.hote/cle). MinIO derrière un proxy exige le premier,
+  // certains hébergeurs n'acceptent que le second. Cloudflare R2 accepte les
+  // deux, d'où la valeur par défaut qui préserve l'installation existante.
+  S3_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 
   // Notifications push. Optionnel : sans compte de service Firebase, le serveur
   // démarre avec un fournisseur inerte et le signale au démarrage. La remise
