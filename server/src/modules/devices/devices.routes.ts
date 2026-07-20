@@ -30,6 +30,11 @@ export async function devicesRoutes(app: FastifyInstance) {
       platform: d.platform,
       identityPublicKey: b64(d.identityPublicKey),
       isActive: d.isActive,
+      // Date de création : sert à la synchronisation multi-appareils. L'appareil
+      // le plus ancien fait autorité et rétro-remplit les plus récents, en ne
+      // renvoyant que l'historique antérieur à leur création — donc sans
+      // chevaucher les messages reçus en direct depuis.
+      createdAt: d.createdAt.toISOString(),
     }));
   });
 

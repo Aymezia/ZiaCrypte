@@ -50,6 +50,9 @@ class ChatService extends ChangeNotifier {
   /// Matériel X3DH en attente d'envoi, par conversation (premier message).
   final Map<String, HandshakeMaterial> _pendingHandshakes = {};
 
+  /// Appareils frères déjà rétro-remplis (pour ne pas le refaire). Persisté.
+  final Set<String> _backfilledSiblings = {};
+
   String? error;
   bool busy = false;
 
@@ -327,9 +330,11 @@ class ChatService extends ChangeNotifier {
     await pinning.load();
     _pinning = pinning;
 
+    await _loadBackfilled();
     await _loadConversations();
     _startPolling();
     unawaited(_replenishPrekeys());
+    unawaited(_syncSiblings());
   }
 
   /// Ferme la session sans effacer l'identité ni l'historique local.
@@ -639,6 +644,182 @@ class ChatService extends ChangeNotifier {
   static bool _estAnnonceInterne(String texte) =>
       texte.startsWith(_prefixeAnnonce);
 
+  /// Préfixe des messages de synchronisation d'historique entre appareils d'un
+  /// même compte. Comme l'annonce de groupe, ils voyagent dans le canal chiffré
+  /// et ne s'affichent jamais.
+  static const _prefixeSync = '__zia_sync__:';
+
+  static bool _estSync(String texte) => texte.startsWith(_prefixeSync);
+
+  // ------------------------------------------ synchronisation multi-appareils
+
+  /// Rétro-remplit les appareils frères plus récents avec l'historique.
+  ///
+  /// Les messages en DIRECT atteignent déjà tous les appareils d'un compte —
+  /// chacun est un destinataire de plein droit. Le seul manque est l'historique
+  /// d'AVANT la liaison d'un nouvel appareil. On le comble ici, d'appareil à
+  /// appareil, chiffré de bout en bout.
+  ///
+  /// Règle anti-boucle et anti-doublon : l'appareil le plus ANCIEN fait
+  /// autorité et n'envoie qu'aux plus récents, en ne renvoyant que les messages
+  /// antérieurs à la création du frère — donc sans jamais chevaucher ce que
+  /// celui-ci a reçu en direct depuis.
+  Future<void> _syncSiblings() async {
+    final api = _api;
+    final me = userId;
+    final myDevice = deviceId;
+    if (api == null || me == null || myDevice == null) return;
+    try {
+      final devices = await api.userDevices(me);
+      Map<String, dynamic>? mine;
+      for (final d in devices) {
+        if (d['id'] == myDevice) mine = d;
+      }
+      if (mine == null) return;
+      final myCreatedAt = DateTime.parse(mine['createdAt'] as String);
+
+      for (final d in devices) {
+        final id = d['id'] as String;
+        if (id == myDevice) continue;
+        if (_backfilledSiblings.contains(id)) continue;
+        final theirCreatedAt = DateTime.parse(d['createdAt'] as String);
+        // Uniquement les frères plus récents que moi.
+        if (!theirCreatedAt.isAfter(myCreatedAt)) continue;
+
+        await _backfillSibling(id, before: theirCreatedAt);
+        _backfilledSiblings.add(id);
+        await _saveBackfilled();
+      }
+    } catch (_) {
+      // une synchro ratée n'a aucune conséquence : on réessaiera
+    }
+  }
+
+  Future<void> _backfillSibling(String siblingId,
+      {required DateTime before}) async {
+    for (final conv in _conversations.values.toList()) {
+      final anciens =
+          conv.messages.where((m) => m.at.isBefore(before)).toList();
+      if (anciens.isEmpty) continue;
+      // Borne : on ne renvoie que les 200 derniers messages antérieurs.
+      final recent =
+          anciens.length > 200 ? anciens.sublist(anciens.length - 200) : anciens;
+
+      final data = jsonEncode({
+        'conv': conv.id,
+        'peer': conv.peerUsername,
+        'peerId': conv.peerUserId,
+        'group': conv.isGroup,
+        'members': conv.memberUserIds.toList(),
+        'msgs': recent
+            .map((m) => {
+                  't': m.text,
+                  'm': m.mine,
+                  'a': m.at.millisecondsSinceEpoch,
+                  if (m.attachment != null) 'f': m.attachment!.toJson(),
+                })
+            .toList(),
+      });
+      await _sendToDevice(conv, siblingId, '$_prefixeSync$data');
+    }
+  }
+
+  /// Envoie un contenu chiffré à UN seul appareil (pas de diffusion).
+  Future<void> _sendToDevice(
+      Conversation conv, String device, String text) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return;
+
+    if (!conv.sessions.containsKey(device)) {
+      // Ouvre les sessions avec mes propres appareils, dont ce frère.
+      if (userId != null) await _openSessionsWith(conv, userId!);
+    }
+    final sessionId = conv.sessions[device];
+    if (sessionId == null) return;
+
+    final enc = await gateway.encrypt(sessionId, _encodePayload(text, null));
+    final handshake = _pendingHandshakes['${conv.id}-$device'];
+    await api.sendMessage(
+      conversationId: conv.id,
+      recipientDeviceId: device,
+      clientMessageId: _uuidV4(),
+      headerB64: base64Encode(Envelope.packHeader(enc.header, handshake)),
+      ciphertextB64: base64Encode(enc.ciphertext),
+    );
+    _pendingHandshakes.remove('${conv.id}-$device');
+    await _saveSessions(conv);
+  }
+
+  /// Intègre un lot d'historique reçu d'un autre de mes appareils.
+  Future<void> _applySyncPayload(String json) async {
+    try {
+      final data = jsonDecode(json) as Map<String, dynamic>;
+      final convId = data['conv'] as String;
+      final conv = _conversations.putIfAbsent(
+        convId,
+        () => Conversation(
+          id: convId,
+          peerUsername: data['peer'] as String? ?? 'inconnu',
+        ),
+      );
+      conv.peerUsername = data['peer'] as String? ?? conv.peerUsername;
+      conv.peerUserId ??= data['peerId'] as String?;
+      if (data['group'] == true) conv.isGroup = true;
+      conv.memberUserIds
+          .addAll(((data['members'] as List?) ?? const []).cast<String>());
+
+      // Anti-doublon : on ignore les messages dont l'horodatage exact est déjà
+      // présent. Le direct et le rétro-remplissage ne se recouvrent pas (bornés
+      // par la date de création), ceci n'est qu'une ceinture de sécurité.
+      final presents =
+          conv.messages.map((m) => m.at.millisecondsSinceEpoch).toSet();
+      final entrants = <ChatMessage>[];
+      for (final e in (data['msgs'] as List).cast<Map<String, dynamic>>()) {
+        final at = (e['a'] as num).toInt();
+        if (presents.contains(at)) continue;
+        entrants.add(ChatMessage(
+          text: e['t'] as String,
+          mine: e['m'] as bool,
+          at: DateTime.fromMillisecondsSinceEpoch(at),
+          attachment: e['f'] == null
+              ? null
+              : AttachmentRef.fromJson((e['f'] as Map).cast<String, Object?>()),
+        ));
+      }
+      if (entrants.isEmpty) return;
+      conv.messages.addAll(entrants);
+      conv.messages.sort((a, b) => a.at.compareTo(b.at));
+
+      await _saveHistory(conv);
+      await _saveConversations();
+      notifyListeners();
+    } catch (_) {
+      // un lot illisible ne doit pas interrompre la relève
+    }
+  }
+
+  Future<void> _saveBackfilled() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    try {
+      await gateway.engine.vaultWrite('backfilled_siblings',
+          Uint8List.fromList(utf8.encode(jsonEncode(_backfilledSiblings.toList()))));
+    } catch (_) {}
+  }
+
+  Future<void> _loadBackfilled() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    try {
+      final raw = await gateway.engine.vaultRead('backfilled_siblings');
+      if (raw == null || raw.isEmpty) return;
+      _backfilledSiblings
+        ..clear()
+        ..addAll((jsonDecode(utf8.decode(raw)) as List).cast<String>());
+    } catch (_) {}
+  }
+
   Future<void> send(String text) => _sendPayload(text, null);
 
   /// Chiffre et diffuse un contenu vers tous les appareils de la conversation.
@@ -904,6 +1085,7 @@ class ChatService extends ChangeNotifier {
     _poll = Timer.periodic(const Duration(seconds: 15), (_) {
       _pollOnce();
       _checkDeliveries();
+      _syncSiblings();
     });
     _connectRealtime();
   }
@@ -999,6 +1181,12 @@ class ChatService extends ChangeNotifier {
         // j'ai écrit : il s'affiche comme tel plutôt que comme reçu.
         final fromMyself = (m['senderUsername'] as String?) == username;
         final payload = _decodePayload(plain);
+
+        // Lot de synchronisation d'historique venu d'un autre de mes appareils.
+        if (_estSync(payload.text)) {
+          await _applySyncPayload(payload.text.substring(_prefixeSync.length));
+          continue;
+        }
 
         // Annonce du nom d'un groupe : elle sert à nommer la conversation, pas
         // à s'afficher comme un message. Le serveur n'a jamais vu ce nom.

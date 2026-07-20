@@ -62,6 +62,12 @@ class ApiClient {
     return res.data!;
   }
 
+  /// Appareils actifs d'un utilisateur (clé publique + date de création).
+  Future<List<Map<String, dynamic>>> userDevices(String userId) async {
+    final res = await _dio.get<List<dynamic>>('/v1/devices/$userId');
+    return (res.data ?? []).cast<Map<String, dynamic>>();
+  }
+
   /// Bundles de tous les appareils actifs d'un utilisateur (multi-appareils).
   Future<List<Map<String, dynamic>>> prekeyBundles(String userId) async {
     final res =
