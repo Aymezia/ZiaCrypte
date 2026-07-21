@@ -40,3 +40,10 @@ endif()
 add_executable(zia_backup_test backup_test.cpp)
 target_link_libraries(zia_backup_test PRIVATE zia_crypto)
 add_test(NAME backup COMMAND zia_backup_test)
+
+# Expéditeur scellé : le test central n'est pas l'aller-retour — il réussirait
+# avec n'importe quel chiffrement — mais le fait que l'enveloppe ne laisse rien
+# filtrer de son auteur, et qu'un tiers ne puisse pas l'ouvrir.
+add_executable(zia_sealed_sender_test sealed_sender_test.cpp)
+target_link_libraries(zia_sealed_sender_test PRIVATE zia_crypto)
+add_test(NAME sealed_sender COMMAND zia_sealed_sender_test)

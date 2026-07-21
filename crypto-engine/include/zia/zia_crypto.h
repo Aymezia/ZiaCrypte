@@ -116,6 +116,31 @@ ZIA_API ZiaStatus zia_attachment_encrypt(const uint8_t* plaintext, size_t plaint
  * Vérifie qu'un fichier téléchargé a bien été signé par la clé attendue.
  * Le hachage se fait EN FLUX : un artefact de plusieurs dizaines de Mo n'est
  * jamais chargé entièrement en mémoire. `signature` est détachée (Ed25519). */
+/* ---- Expéditeur scellé ----
+ *
+ * Le serveur ne peut pas lire les messages, mais il sait qui écrit à qui. Ce
+ * graphe en apprend souvent plus que le contenu. Pire, le premier message d'une
+ * session transporte la clé d'identité de l'expéditeur en clair dans son
+ * en-tête : masquer seulement l'identifiant d'appareil ne changerait rien.
+ *
+ * `zia_sealed_seal` chiffre à destination d'une clé d'identité SANS révéler
+ * l'expéditeur (crypto_box_seal : paire éphémère + secret partagé). Deux envois
+ * du même contenu donnent des octets différents.
+ *
+ * L'expéditeur reste identifié À L'INTÉRIEUR de l'enveloppe : le destinataire
+ * doit savoir qui lui parle. C'est le serveur, et lui seul, qu'on aveugle.
+ *
+ * Les tampons rendus sont à libérer avec zia_free_buffer. */
+ZIA_API ZiaStatus zia_sealed_seal(const uint8_t recipient_identity[ZIA_PUBLIC_KEY_LEN],
+                                  const uint8_t* plaintext, size_t plaintext_len,
+                                  uint8_t** out, size_t* out_len);
+
+/* Ouvre une enveloppe scellée qui nous est destinée. Échoue si elle vise un
+ * autre appareil OU si elle a été altérée — les deux sont indiscernables. */
+ZIA_API ZiaStatus zia_sealed_open(ZiaEngine* engine, const uint8_t* sealed,
+                                  size_t sealed_len, uint8_t** out,
+                                  size_t* out_len);
+
 /* ---- Code de verrouillage de l'application ----
  *
  * Interdit la lecture des conversations à qui passe devant un appareil

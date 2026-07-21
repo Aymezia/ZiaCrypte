@@ -12,6 +12,7 @@ add_library(zia_crypto SHARED
     safety_number.cpp
     backup.cpp
     applock.cpp
+    sealed_sender.cpp
     release_signature.cpp
 )
 
