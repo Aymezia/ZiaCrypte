@@ -126,6 +126,22 @@ class ApiClient {
     await _dio.delete<void>('/v1/devices/$deviceId');
   }
 
+  /// Comptes bloqués par l'utilisateur courant.
+  Future<List<Map<String, dynamic>>> blocages() async {
+    final res = await _dio.get<List<dynamic>>('/v1/blocks');
+    return (res.data ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// Bloque un compte. Le serveur cesse de remettre ses messages ; l'intéressé
+  /// ne l'apprend pas — il reçoit la même réponse qu'un envoi normal.
+  Future<void> bloquer(String userId) async {
+    await _dio.post<void>('/v1/blocks', data: {'userId': userId});
+  }
+
+  Future<void> debloquer(String userId) async {
+    await _dio.delete<void>('/v1/blocks/$userId');
+  }
+
   /// Supprime le compte courant (mot de passe redemandé côté serveur).
   Future<void> deleteAccount(String password) async {
     await _dio.delete<void>('/v1/users/me', data: {'password': password});

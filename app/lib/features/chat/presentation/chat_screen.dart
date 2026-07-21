@@ -523,7 +523,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 )
               : null,
           title: _conversationTitle(theme, s),
-          actions: [_boutonEphemere(theme, s)],
+          actions: [_boutonEphemere(theme, s), _menuConversation(theme, s)],
         ),
         body: _messagesAndComposer(theme, s),
       );
@@ -533,7 +533,7 @@ class _ChatScreenState extends State<ChatScreen> {
           AppBar(
             automaticallyImplyLeading: false,
             title: _conversationTitle(theme, s),
-            actions: [_boutonEphemere(theme, s)],
+            actions: [_boutonEphemere(theme, s), _menuConversation(theme, s)],
           ),
           Expanded(child: _messagesAndComposer(theme, s)),
         ],
@@ -578,6 +578,63 @@ class _ChatScreenState extends State<ChatScreen> {
               style: TextStyle(fontSize: 11),
             ),
           ),
+        ),
+      ],
+    );
+  }
+
+  /// Menu de la conversation : pour l'instant, le blocage.
+  Widget _menuConversation(ThemeData theme, ChatService s) {
+    final conv = s.active!;
+    final peer = conv.peerUserId;
+    // Rien à proposer sur un groupe : bloquer un groupe reviendrait à bloquer
+    // des gens qu'on n'a pas choisi de bloquer.
+    if (peer == null || conv.isGroup) return const SizedBox.shrink();
+    final bloque = s.bloques.contains(peer);
+
+    return PopupMenuButton<String>(
+      tooltip: 'Plus',
+      onSelected: (v) async {
+        if (v != 'bloquer') return;
+        if (bloque) {
+          await s.debloquer(peer);
+          return;
+        }
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('Bloquer ${conv.peerUsername} ?'),
+            content: const Text(
+              'Ses messages cesseront d’arriver, et le serveur ne les stockera '
+              'même pas.\n\n'
+              'Il ne saura pas qu’il est bloqué : vu de lui, ses messages '
+              'partent sans jamais être remis. C’est voulu — un refus '
+              'explicite pousse souvent à recommencer depuis un autre compte.',
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Annuler')),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: Theme.of(ctx).colorScheme.error),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Bloquer'),
+              ),
+            ],
+          ),
+        );
+        if (ok == true) await s.bloquer(peer);
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'bloquer',
+          child: Row(children: [
+            Icon(bloque ? Icons.lock_open : Icons.block,
+                size: 18, color: bloque ? null : theme.colorScheme.error),
+            const SizedBox(width: 10),
+            Text(bloque ? 'Débloquer' : 'Bloquer'),
+          ]),
         ),
       ],
     );

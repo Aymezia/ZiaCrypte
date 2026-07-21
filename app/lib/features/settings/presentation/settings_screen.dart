@@ -9,6 +9,7 @@ import '../../chat/data/chat_service.dart';
 import '../../chat/presentation/identity_avatar.dart';
 import '../../../core/update/update_service.dart';
 import 'backup_sheet.dart';
+import 'blocked_screen.dart';
 import 'devices_screen.dart';
 import 'two_factor_sheet.dart';
 import 'update_sheet.dart';
@@ -351,6 +352,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     'N’empêche pas de photographier l’écran'),
               ),
             ),
+          ListTile(
+            leading: const Icon(Icons.block),
+            title: const Text('Comptes bloqués'),
+            subtitle: const Text(
+                'Leurs messages ne sont pas remis, et ils ne le savent pas'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => BlockedScreen(service: s),
+            )),
+          ),
           ListTile(
             leading: const Icon(Icons.devices_other),
             title: const Text('Appareils liés'),

@@ -416,6 +416,9 @@ class ChatService extends ChangeNotifier {
     _pinning = pinning;
 
     await _chargerAvatars();
+    // Liste des blocages chargée à la connexion : sans elle, le menu
+    // proposerait « Bloquer » à quelqu'un qui l'est déjà.
+    listerBlocages().catchError((_) => <Map<String, dynamic>>[]);
     await _loadBackfilled();
     await _loadConversations();
     _startPolling();
@@ -716,6 +719,36 @@ class ChatService extends ChangeNotifier {
     final g = _gateway;
     if (g == null) return;
     await g.engine.appLockClear();
+  }
+
+  /// Identifiants des comptes bloqués, gardés en mémoire pour l'affichage.
+  final Set<String> bloques = {};
+
+  Future<List<Map<String, dynamic>>> listerBlocages() async {
+    final api = _api;
+    if (api == null) throw StateError('Session fermée.');
+    final liste = await api.blocages();
+    bloques
+      ..clear()
+      ..addAll(liste.map((b) => b['userId'] as String));
+    notifyListeners();
+    return liste;
+  }
+
+  Future<void> bloquer(String userId) async {
+    final api = _api;
+    if (api == null) return;
+    await api.bloquer(userId);
+    bloques.add(userId);
+    notifyListeners();
+  }
+
+  Future<void> debloquer(String userId) async {
+    final api = _api;
+    if (api == null) return;
+    await api.debloquer(userId);
+    bloques.remove(userId);
+    notifyListeners();
   }
 
   /// Appareils liés au compte, pour l'écran de gestion.
