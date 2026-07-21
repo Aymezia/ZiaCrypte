@@ -693,6 +693,31 @@ class ChatService extends ChangeNotifier {
     await gateway.engine.backupImport(phrase, octets);
   }
 
+  /// Un code de verrouillage est-il posé sur cet appareil ?
+  Future<bool> verrouillageActif() async {
+    final g = _gateway;
+    if (g == null) return false;
+    return g.engine.appLockIsSet();
+  }
+
+  Future<void> definirVerrouillage(String code) async {
+    final g = _gateway;
+    if (g == null) throw StateError('Connecte-toi d\u2019abord.');
+    await g.engine.appLockSet(code);
+  }
+
+  Future<bool> verifierVerrouillage(String code) async {
+    final g = _gateway;
+    if (g == null) return false;
+    return g.engine.appLockVerify(code);
+  }
+
+  Future<void> retirerVerrouillage() async {
+    final g = _gateway;
+    if (g == null) return;
+    await g.engine.appLockClear();
+  }
+
   /// Appareils liés au compte, pour l'écran de gestion.
   Future<List<Map<String, dynamic>>> listerAppareils() async {
     final api = _api;

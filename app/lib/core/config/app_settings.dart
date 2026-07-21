@@ -11,7 +11,8 @@ import 'app_storage.dart';
 /// propres à cet appareil. Les secrets restent dans le coffre chiffré du moteur.
 class AppSettings extends ChangeNotifier {
   AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu,
-      this._indicateurEcriture, this._accusesLecture, this._versionEcartee);
+      this._indicateurEcriture, this._accusesLecture, this._versionEcartee,
+      this._delaiVerrouillage, this._protectionEcran);
 
   ThemeMode _themeMode;
   bool _enterToSend;
@@ -19,6 +20,8 @@ class AppSettings extends ChangeNotifier {
   bool _indicateurEcriture;
   bool _accusesLecture;
   String? _versionEcartee;
+  int _delaiVerrouillage;
+  bool _protectionEcran;
 
   ThemeMode get themeMode => _themeMode;
   bool get enterToSend => _enterToSend;
@@ -35,6 +38,20 @@ class AppSettings extends ChangeNotifier {
   /// DÉSACTIVÉ par défaut. Un accusé de lecture révèle quand on ouvre un
   /// message — une information que personne ne doit donner sans l'avoir choisi.
   bool get accusesLecture => _accusesLecture;
+
+  /// Secondes d'absence avant que l'application se reverrouille.
+  ///
+  /// Un verrouillage immédiat à chaque bascule d'application rendrait
+  /// l'utilisation pénible au point qu'on le désactive — et un verrou
+  /// désactivé ne protège de rien.
+  int get delaiVerrouillage => _delaiVerrouillage;
+
+  /// Bloquer les captures d'écran et l'aperçu dans les tâches récentes.
+  ///
+  /// Actif par défaut : l'aperçu que le système garde après une bascule
+  /// survit à la fermeture et entre dans les sauvegardes. N'empêche pas de
+  /// photographier l'écran avec un autre appareil.
+  bool get protectionEcran => _protectionEcran;
 
   /// Version de mise à jour écartée par l'utilisateur, s'il y en a une.
   ///
@@ -56,9 +73,11 @@ class AppSettings extends ChangeNotifier {
     bool indicateurEcriture = true,
     bool accusesLecture = false,
     String? versionEcartee,
+    int delaiVerrouillage = 60,
+    bool protectionEcran = true,
   }) =>
       AppSettings._(themeMode, enterToSend, onboardingVu, indicateurEcriture,
-          accusesLecture, versionEcartee);
+          accusesLecture, versionEcartee, delaiVerrouillage, protectionEcran);
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
@@ -76,12 +95,15 @@ class AppSettings extends ChangeNotifier {
           json['indicateurEcriture'] as bool? ?? true,
           json['accusesLecture'] as bool? ?? false,
           json['versionEcartee'] as String?,
+          (json['delaiVerrouillage'] as num?)?.toInt() ?? 60,
+          json['protectionEcran'] as bool? ?? true,
         );
       }
     } catch (_) {
       // on retombe sur les valeurs par défaut
     }
-    return AppSettings._(ThemeMode.system, true, false, true, false, null);
+    return AppSettings._(
+        ThemeMode.system, true, false, true, false, null, 60, true);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -119,6 +141,20 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setDelaiVerrouillage(int secondes) {
+    if (secondes == _delaiVerrouillage) return;
+    _delaiVerrouillage = secondes;
+    _save();
+    notifyListeners();
+  }
+
+  void setProtectionEcran(bool v) {
+    if (v == _protectionEcran) return;
+    _protectionEcran = v;
+    _save();
+    notifyListeners();
+  }
+
   void marquerOnboardingVu() {
     if (_onboardingVu) return;
     _onboardingVu = true;
@@ -137,6 +173,8 @@ class AppSettings extends ChangeNotifier {
         'indicateurEcriture': _indicateurEcriture,
         'accusesLecture': _accusesLecture,
         'versionEcartee': _versionEcartee,
+        'delaiVerrouillage': _delaiVerrouillage,
+        'protectionEcran': _protectionEcran,
       }));
     } catch (_) {
       // écriture best-effort : une préférence non persistée n'est pas critique

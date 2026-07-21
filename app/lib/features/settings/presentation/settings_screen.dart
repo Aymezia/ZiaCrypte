@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -29,10 +31,96 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool? _twoFactorEnabled;
 
+  bool _verrouillagePose = false;
+
   @override
   void initState() {
     super.initState();
     _refresh2fa();
+    _refreshVerrou();
+  }
+
+  Future<void> _refreshVerrou() async {
+    final pose = await widget.service.verrouillageActif();
+    if (mounted) setState(() => _verrouillagePose = pose);
+  }
+
+  Future<void> _gererVerrouillage() async {
+    if (_verrouillagePose) {
+      final retirer = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Retirer le code ?'),
+          content: const Text(
+              'L’application ne se verrouillera plus. Tes messages restent '
+              'chiffrés — ce code ne protège que d’un regard sur un appareil '
+              'déjà déverrouillé.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annuler')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Retirer')),
+          ],
+        ),
+      );
+      if (retirer != true) return;
+      await widget.service.retirerVerrouillage();
+      await _refreshVerrou();
+      return;
+    }
+
+    final ctrl = TextEditingController();
+    final confirm = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Code de verrouillage'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text(
+            'Quatre caractères minimum. Il n’est pas récupérable : si tu '
+            'l’oublies, il faudra te déconnecter et te reconnecter.',
+            style: TextStyle(fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            obscureText: true,
+            autofocus: true,
+            decoration: const InputDecoration(
+                labelText: 'Code', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: confirm,
+            obscureText: true,
+            decoration: const InputDecoration(
+                labelText: 'Confirme', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler')),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+                ctx, ctrl.text == confirm.text ? ctrl.text : null),
+            child: const Text('Valider'),
+          ),
+        ],
+      ),
+    );
+    if (code == null || code.length < 4) return;
+    try {
+      await widget.service.definirVerrouillage(code);
+      await _refreshVerrou();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
   }
 
   Future<void> _refresh2fa() async {
@@ -219,6 +307,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await _refresh2fa();
             },
           ),
+          ListTile(
+            leading: Icon(_verrouillagePose ? Icons.lock : Icons.lock_open),
+            title: const Text('Code de verrouillage'),
+            subtitle: Text(_verrouillagePose
+                ? 'Demandé au retour dans l’application'
+                : 'Protège d’un regard sur un appareil déverrouillé'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _gererVerrouillage,
+          ),
+          if (_verrouillagePose)
+            ListenableBuilder(
+              listenable: widget.settings,
+              builder: (context, _) => ListTile(
+                leading: const Icon(Icons.timer_outlined),
+                title: const Text('Verrouiller après'),
+                subtitle: Text(switch (widget.settings.delaiVerrouillage) {
+                  0 => 'Immédiatement',
+                  60 => '1 minute d’absence',
+                  300 => '5 minutes d’absence',
+                  _ => '${widget.settings.delaiVerrouillage} s d’absence',
+                }),
+                trailing: PopupMenuButton<int>(
+                  onSelected: widget.settings.setDelaiVerrouillage,
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 0, child: Text('Immédiatement')),
+                    PopupMenuItem(value: 60, child: Text('1 minute')),
+                    PopupMenuItem(value: 300, child: Text('5 minutes')),
+                  ],
+                ),
+              ),
+            ),
+          if (Platform.isAndroid)
+            ListenableBuilder(
+              listenable: widget.settings,
+              builder: (context, _) => SwitchListTile(
+                secondary: const Icon(Icons.screenshot_monitor_outlined),
+                value: widget.settings.protectionEcran,
+                onChanged: widget.settings.setProtectionEcran,
+                title: const Text('Bloquer les captures d’écran'),
+                subtitle: const Text(
+                    'Masque aussi l’aperçu dans les tâches récentes. '
+                    'N’empêche pas de photographier l’écran'),
+              ),
+            ),
           ListTile(
             leading: const Icon(Icons.devices_other),
             title: const Text('Appareils liés'),
