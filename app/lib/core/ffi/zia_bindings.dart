@@ -188,6 +188,20 @@ class ZiaBindings {
             Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, Size),
             int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>,
                 int)>('zia_backup_import'),
+        appLockSet = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>)>('zia_app_lock_set'),
+        appLockVerify = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>),
+            int Function(
+                Pointer<ZiaEngine>, Pointer<Char>)>('zia_app_lock_verify'),
+        appLockStatus = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Int32>),
+            int Function(
+                Pointer<ZiaEngine>, Pointer<Int32>)>('zia_app_lock_status'),
+        appLockClear = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>),
+            int Function(Pointer<ZiaEngine>)>('zia_app_lock_clear'),
         safetyNumber = lib.lookupFunction<
             Int32 Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,
                 Pointer<Char>, Pointer<Char>),
@@ -249,6 +263,12 @@ class ZiaBindings {
       Pointer<Pointer<Uint8>>, Pointer<Size>) backupExport;
   final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int)
       backupImport;
+
+  /// Code de verrouillage de l'application (Argon2id côté moteur).
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>) appLockSet;
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>) appLockVerify;
+  final int Function(Pointer<ZiaEngine>, Pointer<Int32>) appLockStatus;
+  final int Function(Pointer<ZiaEngine>) appLockClear;
 
   /// Empreinte des deux clés d'identité (60 chiffres + octet nul).
   final int Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,

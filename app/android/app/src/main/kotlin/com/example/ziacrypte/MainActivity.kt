@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import com.ziacrypte.KeyStoreBridge
 import io.flutter.embedding.android.FlutterActivity
@@ -29,9 +30,35 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "installerApk" -> installerApk(call.argument<String>("chemin"), result)
                     "ouvrirFichier" -> ouvrirFichier(call.argument<String>("chemin"), result)
+                    "protegerEcran" -> {
+                        protegerEcran(call.argument<Boolean>("actif") ?: true)
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /**
+     * Empêche les captures d'écran et masque l'application dans la liste des
+     * tâches récentes.
+     *
+     * Ce que ça arrête : une capture faite par l'appareil lui-même, et
+     * l'aperçu que le système garde en mémoire après un changement
+     * d'application — lequel survit à la fermeture et se retrouve dans les
+     * sauvegardes.
+     *
+     * Ce que ça n'arrête PAS, et l'interface doit le dire : photographier
+     * l'écran avec un autre téléphone. Aucun logiciel ne peut l'empêcher.
+     */
+    private fun protegerEcran(actif: Boolean) {
+        runOnUiThread {
+            if (actif) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
     }
 
     /**

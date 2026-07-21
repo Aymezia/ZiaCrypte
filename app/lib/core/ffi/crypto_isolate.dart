@@ -120,6 +120,17 @@ class ZiaCryptoEngine {
   Future<void> backupImport(String passphrase, Uint8List data) =>
       _call('backupImport', {'phrase': passphrase, 'data': data});
 
+  /// Pose le code de verrouillage de l'application.
+  Future<void> appLockSet(String code) => _call('appLockSet', {'c': code});
+
+  /// Vérifie le code. Argon2id occupe un cœur une fraction de seconde : passer
+  /// par l'isolat évite de figer l'écran de déverrouillage.
+  Future<bool> appLockVerify(String code) => _call('appLockVerify', {'c': code});
+
+  Future<bool> appLockIsSet() => _call('appLockIsSet', const {});
+
+  Future<void> appLockClear() => _call('appLockClear', const {});
+
   /// Range une donnée chiffrée dans le coffre local de l'appareil.
   Future<void> vaultWrite(String name, Uint8List data) =>
       _call('vaultWrite', {'name': name, 'data': data});
@@ -259,6 +270,16 @@ class ZiaCryptoEngine {
         return engine.backupExport(a['phrase'] as String);
       case 'backupImport':
         engine.backupImport(a['phrase'] as String, a['data'] as Uint8List);
+        return null;
+      case 'appLockSet':
+        engine.appLockSet(a['c'] as String);
+        return null;
+      case 'appLockVerify':
+        return engine.appLockVerify(a['c'] as String);
+      case 'appLockIsSet':
+        return engine.appLockIsSet();
+      case 'appLockClear':
+        engine.appLockClear();
         return null;
       case 'vaultWrite':
         engine.vaultWrite(a['name'] as String, a['data'] as Uint8List);

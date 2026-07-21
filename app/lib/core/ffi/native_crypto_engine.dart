@@ -380,6 +380,40 @@ class NativeCryptoEngine {
     }
   }
 
+  // ---- Code de verrouillage ----
+
+  void appLockSet(String code) {
+    final c = code.toNativeUtf8();
+    try {
+      _check(_b.appLockSet(_engine, c.cast<Char>()));
+    } finally {
+      malloc.free(c);
+    }
+  }
+
+  /// Vrai si le code correspond. La comparaison se fait en temps constant dans
+  /// le moteur : en Dart, elle fuirait par le temps de réponse.
+  bool appLockVerify(String code) {
+    final c = code.toNativeUtf8();
+    try {
+      return _b.appLockVerify(_engine, c.cast<Char>()) == 0;
+    } finally {
+      malloc.free(c);
+    }
+  }
+
+  bool appLockIsSet() {
+    final out = calloc<Int32>();
+    try {
+      _check(_b.appLockStatus(_engine, out));
+      return out.value != 0;
+    } finally {
+      calloc.free(out);
+    }
+  }
+
+  void appLockClear() => _check(_b.appLockClear(_engine));
+
   // ---- Vérification de contact ----
 
   /// Empreinte à 60 chiffres des deux clés d'identité.

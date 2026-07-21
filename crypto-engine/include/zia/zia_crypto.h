@@ -116,6 +116,25 @@ ZIA_API ZiaStatus zia_attachment_encrypt(const uint8_t* plaintext, size_t plaint
  * Vérifie qu'un fichier téléchargé a bien été signé par la clé attendue.
  * Le hachage se fait EN FLUX : un artefact de plusieurs dizaines de Mo n'est
  * jamais chargé entièrement en mémoire. `signature` est détachée (Ed25519). */
+/* ---- Code de verrouillage de l'application ----
+ *
+ * Interdit la lecture des conversations à qui passe devant un appareil
+ * déverrouillé — de loin la manière la plus fréquente dont une conversation est
+ * lue par quelqu'un d'autre.
+ *
+ * Ne protège PAS d'un adversaire qui possède l'appareil : les clés restent
+ * déchiffrables par le coffre-fort du système dès la session ouverte. Dériver
+ * la clé du coffre depuis ce code empêcherait de recevoir les messages
+ * application fermée, et ferait d'un code oublié une perte définitive.
+ *
+ * Le hachage est fait ici (Argon2id via crypto_pwhash_str) et la vérification
+ * en temps constant : une comparaison de chaînes en Dart fuirait par le temps
+ * de réponse. */
+ZIA_API ZiaStatus zia_app_lock_set(ZiaEngine* engine, const char* code);
+ZIA_API ZiaStatus zia_app_lock_verify(ZiaEngine* engine, const char* code);
+ZIA_API ZiaStatus zia_app_lock_status(ZiaEngine* engine, int* out_set);
+ZIA_API ZiaStatus zia_app_lock_clear(ZiaEngine* engine);
+
 /**
  * Sauvegarde chiffrée exportable, protégée par une phrase de passe (Argon2id).
  *
