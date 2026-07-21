@@ -43,10 +43,16 @@ g++ -std=c++20 -O2 -DNDEBUG -fPIC -shared \
 # se lie, s'empaquette — et fait échouer l'application au démarrage sur un
 # symbole manquant. C'est arrivé avec safety_number.cpp.
 echo ">> Vérification des symboles exportés"
-MISSING=""
-for SYM in $(grep -oE 'zia_[a-z_]+\(' "$ENGINE/include/zia/zia_crypto.h" | tr -d '(' | sort -u); do
-  nm -D --defined-only "$TMP_SO" | grep -q " $SYM\$" || MISSING="$MISSING $SYM"
-done
+#
+# Un seul appel à `nm`, dont le résultat est comparé en mémoire. La version
+# précédente relançait `nm` une fois par symbole — une vingtaine de processus
+# dont certains échouaient par intermittence, produisant des listes de symboles
+# « manquants » qui changeaient à chaque exécution alors que la bibliothèque
+# les exportait bel et bien. Un contrôle qui donne des réponses différentes sur
+# la même entrée ne contrôle rien.
+EXPORTED="$(nm -D --defined-only "$TMP_SO" | awk '$2 == "T" { print $3 }' | sort -u)"
+DECLARED="$(grep -oE 'zia_[a-z_]+\(' "$ENGINE/include/zia/zia_crypto.h" | tr -d '(' | sort -u)"
+MISSING="$(comm -23 <(echo "$DECLARED") <(echo "$EXPORTED") | tr '\n' ' ')"
 if [ -n "$MISSING" ]; then
   echo "ERREUR : symboles déclarés dans l'en-tête mais absents de la bibliothèque :"
   for S in $MISSING; do echo "  - $S"; done
