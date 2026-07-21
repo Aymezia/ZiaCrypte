@@ -143,11 +143,17 @@ export async function messagesRoutes(app: FastifyInstance) {
       id: m.id,
       conversationId: m.conversationId,
       senderDeviceId: m.senderDeviceId,
-      senderUsername: m.sender.user.username,
+      // Absents pour un message SCELLÉ : le serveur ne sait pas qui l'a
+      // déposé, et c'est tout l'objet. Le client trouve l'expéditeur à
+      // l'intérieur de l'enveloppe, une fois ouverte. Le champ `sealed` le lui
+      // signale — sans quoi il chercherait un en-tête de ratchet qui n'existe
+      // pas et rejetterait le message sans comprendre pourquoi.
+      sealed: m.senderDeviceId === null,
+      senderUsername: m.sender?.user.username ?? null,
       // Identifiant de compte de l'expéditeur : sert d'ancrage stable pour
       // l'épinglage des clés d'identité côté client. Le pseudo ne convient pas,
       // il peut être réattribué après suppression d'un compte.
-      senderUserId: m.sender.userId,
+      senderUserId: m.sender?.userId ?? null,
       clientMessageId: m.clientMessageId,
       header: b64(m.ratchetHeader),
       ciphertext: b64(m.ciphertext),

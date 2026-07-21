@@ -95,6 +95,17 @@ model Device {
   platform          DevicePlatform
   identityPublicKey Bytes    @map("identity_public_key")
   isActive          Boolean  @default(true) @map("is_active")
+
+  // Jeton de remise pour l'expéditeur scellé.
+  //
+  // Stocké HACHÉ : le serveur doit pouvoir reconnaître un jeton présenté, pas
+  // le retrouver ni le distribuer. Sa valeur en clair ne circule que dans le
+  // canal chiffré, vers les correspondants avec qui une session existe déjà.
+  //
+  // C'est ce jeton qui remplace l'authentification au dépôt : celui qui le
+  // détient peut déposer un blob pour cet appareil SANS dire qui il est. Le
+  // serveur perd ainsi la moitié du graphe social qu'il observait.
+  deliveryTokenHash String? @map("delivery_token_hash")
   createdAt         DateTime @default(now()) @map("created_at")
   lastSeenAt        DateTime @default(now()) @map("last_seen_at")
 
@@ -183,9 +194,14 @@ model ConversationParticipant {
 }
 
 model MessageBlob {
-  id                String    @id @default(uuid()) @db.Uuid
-  conversationId    String    @map("conversation_id") @db.Uuid
-  senderDeviceId    String    @map("sender_device_id") @db.Uuid
+  id String @id @default(uuid()) @db.Uuid
+
+  // Tous deux NULLABLES depuis l'expéditeur scellé : un blob déposé avec un
+  // jeton de remise ne dit ni qui l'envoie, ni dans quelle conversation. Ces
+  // deux champs étaient précisément ce que le serveur observait du graphe
+  // social — les garder obligatoires aurait vidé le scellement de son sens.
+  conversationId String? @map("conversation_id") @db.Uuid
+  senderDeviceId String? @map("sender_device_id") @db.Uuid
   recipientDeviceId String    @map("recipient_device_id") @db.Uuid
   clientMessageId   String    @map("client_message_id") @db.Uuid
   ratchetHeader     Bytes     @map("ratchet_header")
@@ -194,12 +210,12 @@ model MessageBlob {
   deliveredAt       DateTime? @map("delivered_at")
   expiresAt         DateTime  @map("expires_at")
 
-  conversation Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   // Cascade des deux côtés : un blob non remis à un appareil supprimé est
   // indéchiffrable de toute façon (ses clés privées ont disparu avec lui). Le
   // conserver bloquerait la suppression de compte et garderait du chiffré sans
   // titulaire — l'inverse de la minimisation des données.
-  sender       Device          @relation("SentBlobs", fields: [senderDeviceId], references: [id], onDelete: Cascade)
+  sender       Device?         @relation("SentBlobs", fields: [senderDeviceId], references: [id], onDelete: Cascade)
   recipient    Device          @relation("ReceivedBlobs", fields: [recipientDeviceId], references: [id], onDelete: Cascade)
   receipts     MessageReceipt[]
 
