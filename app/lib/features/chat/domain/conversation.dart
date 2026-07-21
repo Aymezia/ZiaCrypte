@@ -18,6 +18,7 @@ class Conversation {
     Map<String, int>? sessions,
     List<ChatMessage>? messages,
     DateTime? lastActivity,
+    this.ttlSecondes = 0,
   })  : memberUserIds = memberUserIds ?? {},
         ownDeviceIds = ownDeviceIds ?? {},
         targetDeviceIds = targetDeviceIds ?? {},
@@ -41,6 +42,15 @@ class Conversation {
   /// Renseigné à la réception de l'annonce de nom : le destinataire découvre
   /// le groupe par le canal chiffré, pas par le serveur.
   bool isGroup;
+
+  /// Durée de vie des messages, en secondes. 0 = désactivée.
+  ///
+  /// Le compte démarre à l'ENVOI, pas à la lecture. Signal fait l'inverse, mais
+  /// il dispose des accusés de lecture ; ici ils sont facultatifs et désactivés
+  /// par défaut, et faire dépendre l'effacement d'un signal que le
+  /// correspondant peut refuser d'émettre donnerait une garantie qui n'en est
+  /// pas une. À l'envoi, l'échéance est la même des deux côtés et prévisible.
+  int ttlSecondes;
 
   /// Membres du groupe, par identifiant de compte.
   ///
@@ -80,6 +90,7 @@ class Conversation {
         if (ownDeviceIds.isNotEmpty) 'own': ownDeviceIds.toList(),
         'devices': targetDeviceIds.toList(),
         'at': lastActivity.millisecondsSinceEpoch,
+        if (ttlSecondes > 0) 'ttl': ttlSecondes,
       };
 
   static Conversation fromJson(Map<String, Object?> json) => Conversation(
@@ -96,5 +107,6 @@ class Conversation {
             .toSet(),
         lastActivity:
             DateTime.fromMillisecondsSinceEpoch((json['at'] as num).toInt()),
+        ttlSecondes: (json['ttl'] as num?)?.toInt() ?? 0,
       );
 }

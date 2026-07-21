@@ -154,7 +154,7 @@ class ChatService extends ChangeNotifier {
 
     if (Platform.isWindows) {
       fileName = 'zia_crypto.dll';
-      candidates = ['$exeDir\\$fileName'];
+      candidates = ['$exeDir\$fileName'];
     } else if (Platform.isMacOS) {
       fileName = 'libzia_crypto.dylib';
       candidates = ['$exeDir/../Frameworks/$fileName', '$exeDir/$fileName'];
@@ -595,6 +595,66 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Durées proposées. Volontairement peu nombreuses : un menu de douze
+  /// options fait hésiter sans rien apporter.
+  static const dureesEphemeres = <int, String>{
+    0: 'Désactivé',
+    3600: '1 heure',
+    86400: '1 jour',
+    604800: '1 semaine',
+    2592000: '4 semaines',
+  };
+
+  /// Change la durée de vie des messages de la conversation active.
+  Future<void> definirTtl(Conversation conv, int secondes) async {
+    if (secondes == conv.ttlSecondes) return;
+    conv.ttlSecondes = secondes;
+    _annoncerTtl(conv, secondes, true);
+    await _saveHistory(conv);
+    notifyListeners();
+    await _diffuserControle(conv, '$_prefixeTtl${jsonEncode({'s': secondes})}');
+  }
+
+  void _annoncerTtl(Conversation conv, int secondes, bool parMoi) {
+    final qui = parMoi ? 'Tu as' : '${conv.peerUsername} a';
+    conv.messages.add(ChatMessage(
+      text: secondes == 0
+          ? '$qui désactivé les messages éphémères.'
+          : '$qui réglé les messages éphémères sur '
+              '${dureesEphemeres[secondes] ?? '$secondes s'}. '
+              'Le compte démarre à l’envoi.',
+      mine: false,
+      at: DateTime.now(),
+      systeme: true,
+    ));
+  }
+
+  /// Efface les messages arrivés à échéance.
+  ///
+  /// Ce n'est PAS une garantie de sécurité et l'interface ne doit pas le
+  /// laisser croire : le correspondant peut photographier son écran, recopier
+  /// le texte, ou avoir un appareil déjà compromis. Ce que ça réduit vraiment,
+  /// c'est ce qu'un appareil saisi ou volé PLUS TARD révélera.
+  Future<void> _balayerExpires() async {
+    final maintenant = DateTime.now();
+    var change = false;
+    for (final conv in _conversations.values) {
+      final avant = conv.messages.length;
+      conv.messages.removeWhere((m) =>
+          m.expiresAt != null && m.expiresAt!.isBefore(maintenant));
+      if (conv.messages.length != avant) {
+        change = true;
+        await _saveHistory(conv);
+      }
+    }
+    if (change) notifyListeners();
+  }
+
+  /// Échéance à donner à un message de cette conversation, s'il y a lieu.
+  DateTime? _echeance(Conversation conv) => conv.ttlSecondes > 0
+      ? DateTime.now().add(Duration(seconds: conv.ttlSecondes))
+      : null;
+
   /// Inscrit dans la conversation qu'un appareil vient d'être rattaché.
   ///
   /// Écrit dans le fil plutôt que dans une notification passagère : un avis
@@ -845,11 +905,19 @@ class ChatService extends ChangeNotifier {
   /// de les livrer au serveur.
   static const _prefixeAvatar = '__zia_avatar__:';
 
+  /// Réglage de la durée de vie des messages.
+  ///
+  /// Passe par le canal chiffré : le serveur ne doit pas apprendre qu'une
+  /// conversation est éphémère, ce qui désignerait justement celles qui
+  /// méritent son attention.
+  static const _prefixeTtl = '__zia_ttl__:';
+
   static bool _estControle(String t) =>
       t.startsWith(_prefixeEdit) ||
       t.startsWith(_prefixeSuppr) ||
       t.startsWith(_prefixeLu) ||
-      t.startsWith(_prefixeAvatar);
+      t.startsWith(_prefixeAvatar) ||
+      t.startsWith(_prefixeTtl);
 
   /// Émission des accusés de lecture, pilotée par les préférences.
   bool accusesLectureActifs = false;
@@ -1028,6 +1096,23 @@ class ChatService extends ChangeNotifier {
   Future<void> _appliquerControle(
       Conversation conv, String texte, bool deMoi) async {
     try {
+      // Durée de vie modifiée par l'un ou l'autre.
+      if (texte.startsWith(_prefixeTtl)) {
+        final json = jsonDecode(texte.substring(_prefixeTtl.length))
+            as Map<String, dynamic>;
+        final secondes = (json['s'] as num?)?.toInt() ?? 0;
+        if (secondes != conv.ttlSecondes) {
+          conv.ttlSecondes = secondes;
+          // Annoncé dans le fil, jamais en silence : quelqu'un qui rallonge la
+          // durée à l'insu de l'autre garderait des messages que celui-ci
+          // croit condamnés. Un réglage partagé doit être visible des deux.
+          _annoncerTtl(conv, secondes, deMoi);
+          await _saveHistory(conv);
+          notifyListeners();
+        }
+        return;
+      }
+
       // Photo de profil annoncée par un correspondant (ou par un de mes
       // propres appareils). On retient la référence ; l'image elle-même n'est
       // téléchargée qu'au moment de l'afficher.
@@ -1318,6 +1403,7 @@ class ChatService extends ChangeNotifier {
           text: text,
           mine: true,
           at: DateTime.now(),
+          expiresAt: _echeance(conv),
           id: messageId,
           replyToId: citation?.id,
           replyToText: citation == null
@@ -1645,6 +1731,7 @@ class ChatService extends ChangeNotifier {
       _pollOnce();
       _checkDeliveries();
       _syncSiblings();
+      _balayerExpires();
     });
     _connectRealtime();
   }
@@ -1796,6 +1883,12 @@ class ChatService extends ChangeNotifier {
           text: payload.text,
           mine: fromMyself,
           at: DateTime.now(),
+          // L'échéance est calculée chez CHAQUE partie à partir du réglage
+          // partagé, plutôt que transportée par l'expéditeur : sinon celui-ci
+          // pourrait annoncer une échéance longue tout en affichant courte
+          // chez lui, et le destinataire garderait un message qu'il croit
+          // condamné.
+          expiresAt: _echeance(conv),
           id: payload.id,
           replyToId: payload.replyToId,
           replyToText: payload.replyToText,

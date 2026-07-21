@@ -19,7 +19,14 @@ class ChatMessage {
     this.readByPeer = false,
     this.readAckSent = false,
     this.systeme = false,
+    this.expiresAt,
   });
+
+  /// Instant après lequel ce message doit disparaître, si la conversation a
+  /// une durée de vie active. Calculé à l'arrivée du message et conservé avec
+  /// lui : changer le réglage ensuite ne doit pas rallonger la vie de ce qui a
+  /// déjà été envoyé sous l'ancien.
+  final DateTime? expiresAt;
 
   /// Avis produit par l'application elle-même, pas par un correspondant.
   ///
@@ -101,6 +108,7 @@ class ChatMessage {
         if (readByPeer) 'lu': true,
         if (readAckSent) 'la': true,
         if (systeme) 'sys': true,
+        if (expiresAt != null) 'exp': expiresAt!.millisecondsSinceEpoch,
       };
 
   static ChatMessage fromJson(Map<String, Object?> json) => ChatMessage(
@@ -124,6 +132,9 @@ class ChatMessage {
         readByPeer: json['lu'] as bool? ?? false,
         readAckSent: json['la'] as bool? ?? false,
         systeme: json['sys'] as bool? ?? false,
+        expiresAt: json['exp'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch((json['exp'] as num).toInt()),
       );
 }
 

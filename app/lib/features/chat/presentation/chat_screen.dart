@@ -523,6 +523,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 )
               : null,
           title: _conversationTitle(theme, s),
+          actions: [_boutonEphemere(theme, s)],
         ),
         body: _messagesAndComposer(theme, s),
       );
@@ -532,10 +533,55 @@ class _ChatScreenState extends State<ChatScreen> {
           AppBar(
             automaticallyImplyLeading: false,
             title: _conversationTitle(theme, s),
+            actions: [_boutonEphemere(theme, s)],
           ),
           Expanded(child: _messagesAndComposer(theme, s)),
         ],
       );
+
+  /// Réglage des messages éphémères, dans l'en-tête de la conversation.
+  ///
+  /// Visible en permanence quand il est actif : un minuteur caché dans un
+  /// sous-menu laisse écrire des choses en croyant qu'elles vont disparaître,
+  /// ou l'inverse.
+  Widget _boutonEphemere(ThemeData theme, ChatService s) {
+    final conv = s.active!;
+    final actif = conv.ttlSecondes > 0;
+    return PopupMenuButton<int>(
+      tooltip: 'Messages éphémères',
+      icon: Icon(actif ? Icons.timer_outlined : Icons.timer_off_outlined,
+          color: actif ? theme.colorScheme.primary : null),
+      onSelected: (v) => s.definirTtl(conv, v),
+      itemBuilder: (context) => [
+        for (final e in ChatService.dureesEphemeres.entries)
+          PopupMenuItem(
+            value: e.key,
+            child: Row(children: [
+              Icon(
+                e.key == conv.ttlSecondes
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                size: 18,
+              ),
+              const SizedBox(width: 10),
+              Text(e.value),
+            ]),
+          ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          enabled: false,
+          child: SizedBox(
+            width: 230,
+            child: Text(
+              'Le compte démarre à l’envoi. Ce n’est pas une garantie : '
+              'l’écran peut être photographié.',
+              style: TextStyle(fontSize: 11),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _conversationTitle(ThemeData theme, ChatService s) {
     final conv = s.active!;
