@@ -69,6 +69,9 @@ model User {
 
   avatars AttachmentRef[] @relation("AvatarOwner")
 
+  blocksMade     Block[] @relation("Blocker")
+  blocksReceived Block[] @relation("Blocked")
+
   @@map("users")
 }
 
@@ -267,6 +270,28 @@ model AuthSession {
   device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@map("auth_sessions")
+}
+
+/**
+ * Blocage d'un compte par un autre.
+ *
+ * Appliqué CÔTÉ SERVEUR, pas seulement à l'affichage : un blocage repose
+ * uniquement dans l'application laisserait la personne bloquée déposer des
+ * blobs, consommer du stockage et voir ses messages « remis ». Le serveur ne
+ * peut pas lire ces messages, mais il sait qui écrit à qui — c'est
+ * précisément ce qu'il faut pour les refuser.
+ */
+model Block {
+  blockerUserId String   @map("blocker_user_id") @db.Uuid
+  blockedUserId String   @map("blocked_user_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  blocker User @relation("Blocker", fields: [blockerUserId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedUserId], references: [id], onDelete: Cascade)
+
+  @@id([blockerUserId, blockedUserId])
+  @@index([blockedUserId])
+  @@map("blocks")
 }
 
 enum UserRole {

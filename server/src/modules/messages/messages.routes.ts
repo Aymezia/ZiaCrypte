@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
 import { requireAuth } from '../../plugins/auth.js';
+import { estBloque } from '../blocks/blocks.routes.js';
 import { gateway } from '../../ws/gateway.js';
 import { requireMembership } from '../conversations/membership.js';
 import { pushService } from '../push/push.service.js';
@@ -36,6 +37,16 @@ export async function messagesRoutes(app: FastifyInstance) {
     const recipient = await prisma.device.findUnique({ where: { id: body.recipientDeviceId } });
     if (!recipient || !recipient.isActive) {
       throw new HttpError(404, 'appareil destinataire introuvable');
+    }
+
+    // Blocage : on accepte la requête et on ne stocke RIEN.
+    //
+    // Répondre par une erreur apprendrait à l'expéditeur qu'il est bloqué, ce
+    // qui, dans les situations de harcèlement, se paie par une escalade ou la
+    // création d'un autre compte. Vu de lui, le message part et n'est jamais
+    // remis — indiscernable d'un destinataire qui ne relève pas.
+    if (await estBloque(me.userId, recipient.userId)) {
+      return reply.code(202).send({ accepted: true });
     }
 
     try {
