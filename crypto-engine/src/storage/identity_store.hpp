@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 struct ZiaEngine;
 
 namespace zia::crypto::storage {
@@ -25,5 +29,19 @@ bool save_identity(const ZiaEngine& engine);
  * présent, ou s'il est illisible (clé maîtresse absente, fichier corrompu).
  */
 bool load_identity(ZiaEngine& engine);
+
+/**
+ * Sérialise / désérialise l'état d'identité EN CLAIR.
+ *
+ * Exposé pour la sauvegarde exportable, qui doit rechiffrer ce même contenu
+ * sous une phrase de passe au lieu de la clé maîtresse de l'appareil — sans
+ * quoi une sauvegarde ne serait restaurable que sur la machine qui l'a
+ * produite, ce qui lui ôterait tout intérêt.
+ *
+ * L'appelant DOIT effacer le tampon rendu (sodium_memzero) : il contient des
+ * clés privées.
+ */
+std::vector<uint8_t> serialize_identity(const ZiaEngine& engine);
+bool deserialize_identity(const uint8_t* data, size_t len, ZiaEngine& engine);
 
 } // namespace zia::crypto::storage

@@ -67,7 +67,9 @@ class Reader {
   size_t offset_ = 0;
 };
 
-std::vector<uint8_t> serialize(const ZiaEngine& engine) {
+} // namespace
+
+std::vector<uint8_t> serialize_identity(const ZiaEngine& engine) {
   std::vector<uint8_t> buf;
   buf.push_back(kFormatVersion);
 
@@ -94,7 +96,7 @@ std::vector<uint8_t> serialize(const ZiaEngine& engine) {
   return buf;
 }
 
-bool deserialize(const uint8_t* data, size_t len, ZiaEngine& engine) {
+bool deserialize_identity(const uint8_t* data, size_t len, ZiaEngine& engine) {
   Reader r(data, len);
 
   uint8_t version = 0;
@@ -136,6 +138,8 @@ bool deserialize(const uint8_t* data, size_t len, ZiaEngine& engine) {
   return r.at_end();
 }
 
+namespace {
+
 bool master_key(SecureBuffer& out) {
   auto& store = platform_key_store();
   if (store.has_master_key()) return store.load_master_key(out);
@@ -154,7 +158,7 @@ bool save_identity(const ZiaEngine& engine) {
   std::filesystem::create_directories(engine.storage_path, ec);
   if (ec) return false;
 
-  std::vector<uint8_t> plain = serialize(engine);
+  std::vector<uint8_t> plain = serialize_identity(engine);
 
   uint8_t header[crypto_secretstream_xchacha20poly1305_HEADERBYTES];
   crypto_secretstream_xchacha20poly1305_state st;
@@ -221,7 +225,7 @@ bool load_identity(ZiaEngine& engine) {
     return false;
   }
 
-  const bool ok = deserialize(plain.data(), static_cast<size_t>(plain_len), engine);
+  const bool ok = deserialize_identity(plain.data(), static_cast<size_t>(plain_len), engine);
   sodium_memzero(plain.data(), plain.size());
   return ok;
 }

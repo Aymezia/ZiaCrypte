@@ -116,6 +116,31 @@ ZIA_API ZiaStatus zia_attachment_encrypt(const uint8_t* plaintext, size_t plaint
  * Vérifie qu'un fichier téléchargé a bien été signé par la clé attendue.
  * Le hachage se fait EN FLUX : un artefact de plusieurs dizaines de Mo n'est
  * jamais chargé entièrement en mémoire. `signature` est détachée (Ed25519). */
+/**
+ * Sauvegarde chiffrée exportable, protégée par une phrase de passe (Argon2id).
+ *
+ * Le coffre local est chiffré sous une clé du coffre-fort du système, qui ne
+ * quitte jamais la machine : une sauvegarde chiffrée avec elle ne serait
+ * restaurable que là où elle a été produite. Le contenu est donc rechiffré
+ * sous une clé dérivée d'une phrase choisie par l'utilisateur.
+ *
+ * Le tampon rendu doit être libéré par zia_free_buffer. Phrase de 12
+ * caractères minimum.
+ */
+ZIA_API ZiaStatus zia_backup_export(ZiaEngine* engine, const char* passphrase,
+                                    uint8_t** out, size_t* out_len);
+
+/**
+ * Restaure une sauvegarde dans CE moteur, puis réécrit l'identité sous la clé
+ * maîtresse de cet appareil.
+ *
+ * Renvoie ZIA_ERR_CRYPTO_FAILURE si la phrase est incorrecte ou le fichier
+ * altéré — les deux sont indiscernables, et c'est voulu : le tag Poly1305 ne
+ * dit pas laquelle des deux causes s'applique.
+ */
+ZIA_API ZiaStatus zia_backup_import(ZiaEngine* engine, const char* passphrase,
+                                    const uint8_t* data, size_t len);
+
 ZIA_API ZiaStatus zia_verify_file_signature(const uint8_t public_key[ZIA_PUBLIC_KEY_LEN],
                                             const char* path,
                                             const uint8_t signature[ZIA_SIGNATURE_LEN]);

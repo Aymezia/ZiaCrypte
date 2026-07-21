@@ -33,3 +33,10 @@ if(ZIA_BUILD_FUZZERS)
   target_link_libraries(zia_fuzz_parsers PRIVATE zia_crypto zia::sodium)
   target_link_options(zia_fuzz_parsers PRIVATE -fsanitize=fuzzer)
 endif()
+
+# Sauvegarde exportable : deux moteurs, deux dossiers de stockage. Le montage
+# est ce qui fait la preuve — un aller-retour dans un seul moteur réussirait
+# même si la clé de l'appareil s'était glissée dans le fichier.
+add_executable(zia_backup_test backup_test.cpp)
+target_link_libraries(zia_backup_test PRIVATE zia_crypto)
+add_test(NAME backup COMMAND zia_backup_test)
