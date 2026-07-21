@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -45,8 +46,14 @@ export async function messagesRoutes(app: FastifyInstance) {
     // qui, dans les situations de harcèlement, se paie par une escalade ou la
     // création d'un autre compte. Vu de lui, le message part et n'est jamais
     // remis — indiscernable d'un destinataire qui ne relève pas.
+    //
+    // La réponse imite EXACTEMENT celle d'un dépôt réussi : même code 201, même
+    // forme, un identifiant d'apparence normale. Un premier essai renvoyait 202
+    // au lieu de 201 — il suffisait de comparer les codes pour savoir qu'on
+    // était bloqué, ce qui vidait la mesure de son sens. L'identifiant est
+    // aléatoire et ne correspond à aucune ligne : le serveur n'a rien écrit.
     if (await estBloque(me.userId, recipient.userId)) {
-      return reply.code(202).send({ accepted: true });
+      return reply.code(201).send({ id: randomUUID() });
     }
 
     try {
