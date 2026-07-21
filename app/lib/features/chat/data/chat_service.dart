@@ -970,6 +970,38 @@ class ChatService extends ChangeNotifier {
   /// méritent son attention.
   static const _prefixeTtl = '__zia_ttl__:';
 
+  /// Un texte est-il un message de CONTRÔLE plutôt qu'un message à afficher ?
+  ///
+  /// Exposé aux tests parce que l'oubli d'un préfixe dans cette liste est un
+  /// défaut silencieux au pire endroit : le message de contrôle brut
+  /// s'afficherait tel quel dans la conversation du correspondant — sous les
+  /// yeux de tout le monde, sans qu'aucune exception ne soit levée.
+  @visibleForTesting
+  static bool estControle(String t) => _estControle(t);
+
+  /// Préfixes de contrôle, pour que les tests puissent les vérifier tous sans
+  /// avoir à les recopier — une liste recopiée dérive.
+  @visibleForTesting
+  static const prefixesControle = <String>[
+    _prefixeEdit,
+    _prefixeSuppr,
+    _prefixeLu,
+    _prefixeAvatar,
+    _prefixeTtl,
+  ];
+
+  /// Encode l'annonce d'une photo de profil. Exposé aux tests : c'est la
+  /// sérialisation qui casse en silence, pas l'envoi.
+  @visibleForTesting
+  static String encoderAvatar(AttachmentRef ref) =>
+      '$_prefixeAvatar${jsonEncode(ref.toJson())}';
+
+  /// Décode une annonce de photo de profil.
+  @visibleForTesting
+  static AttachmentRef decoderAvatar(String charge) => AttachmentRef.fromJson(
+      (jsonDecode(charge.substring(_prefixeAvatar.length)) as Map)
+          .cast<String, Object?>());
+
   static bool _estControle(String t) =>
       t.startsWith(_prefixeEdit) ||
       t.startsWith(_prefixeSuppr) ||
