@@ -6,7 +6,7 @@
 // elle, est intégrée à l'application.
 //
 //   sign_release keygen <prefixe>          -> <prefixe>.pub / <prefixe>.key
-//   sign_release sign <cle.key> <fichier>  -> <fichier>.sig
+//   sign_release sign <cle.key> <f1> [f2...]  -> <fN>.sig (une seule saisie)
 //   sign_release verify <cle.pub> <fichier> <fichier.sig>
 //   sign_release protect <cle.key> <cle.key.enc>   -> chiffre la cle privee
 //
@@ -236,28 +236,45 @@ bool ouvrir_cle(std::vector<unsigned char>& sk) {
   return true;
 }
 
-int signer(const std::string& cle, const std::string& fichier) {
+// Signe PLUSIEURS fichiers en une seule execution.
+//
+// La phrase de passe n'est donc demandee qu'UNE fois. Une premiere version
+// n'acceptait qu'un fichier, ce qui obligeait a la ressaisir pour chaque
+// artefact -- une corvee pour rien : la phrase reside de toute facon en
+// memoire du processus pendant qu'il derive la cle, et un seul processus
+// l'expose moins longtemps que cinq.
+int signer(const std::string& cle, const std::vector<std::string>& fichiers) {
   std::vector<unsigned char> sk;
   if (!lire_fichier(cle, sk) || !ouvrir_cle(sk)) {
     std::fprintf(stderr, "cle privee illisible\n");
     return 1;
   }
-  unsigned char digest[crypto_hash_sha512_BYTES];
-  if (!hacher(fichier, digest)) {
-    std::fprintf(stderr, "fichier illisible : %s\n", fichier.c_str());
-    return 1;
-  }
-  unsigned char sig[crypto_sign_BYTES];
-  crypto_sign_detached(sig, nullptr, digest, sizeof(digest), sk.data());
-  sodium_memzero(sk.data(), sk.size());
 
-  const std::string out = fichier + ".sig";
-  if (!ecrire_fichier(out, sig, sizeof(sig))) {
-    std::fprintf(stderr, "écriture impossible : %s\n", out.c_str());
-    return 1;
+  int echecs = 0;
+  for (const auto& fichier : fichiers) {
+    unsigned char digest[crypto_hash_sha512_BYTES];
+    if (!hacher(fichier, digest)) {
+      std::fprintf(stderr, "fichier illisible : %s\n", fichier.c_str());
+      ++echecs;
+      continue;
+    }
+    unsigned char sig[crypto_sign_BYTES];
+    crypto_sign_detached(sig, nullptr, digest, sizeof(digest), sk.data());
+
+    const std::string out = fichier + ".sig";
+    if (!ecrire_fichier(out, sig, sizeof(sig))) {
+      std::fprintf(stderr, "ecriture impossible : %s\n", out.c_str());
+      ++echecs;
+      continue;
+    }
+    std::printf("signe : %s\n", out.c_str());
   }
-  std::printf("signé : %s\n", out.c_str());
-  return 0;
+
+  // Effacee une seule fois, apres le dernier fichier : la garder plus
+  // longtemps que necessaire n'apporte rien, l'effacer trop tot casserait la
+  // boucle.
+  sodium_memzero(sk.data(), sk.size());
+  return echecs == 0 ? 0 : 1;
 }
 
 int verifier(const std::string& clePub, const std::string& fichier,
@@ -292,7 +309,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr,
                  "usage:\n"
                  "  sign_release keygen <prefixe>\n"
-                 "  sign_release sign <cle.key> <fichier>\n"
+                 "  sign_release sign <cle.key> <fichier> [fichier...]\n"
                  "  sign_release verify <cle.pub> <fichier> <fichier.sig>\n"
                  "  sign_release protect <cle.key> <cle.key.enc>\n");
     return 2;
@@ -300,7 +317,9 @@ int main(int argc, char** argv) {
   const std::string cmd = argv[1];
   if (cmd == "keygen") return keygen(argv[2]);
   if (cmd == "protect" && argc >= 4) return proteger(argv[2], argv[3]);
-  if (cmd == "sign" && argc >= 4) return signer(argv[2], argv[3]);
+  if (cmd == "sign" && argc >= 4) {
+    return signer(argv[2], std::vector<std::string>(argv + 3, argv + argc));
+  }
   if (cmd == "verify" && argc >= 5) return verifier(argv[2], argv[3], argv[4]);
   std::fprintf(stderr, "commande inconnue\n");
   return 2;
