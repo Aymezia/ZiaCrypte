@@ -380,6 +380,45 @@ class NativeCryptoEngine {
     }
   }
 
+  // ---- Expéditeur scellé ----
+
+  /// Scelle [plaintext] à destination de [recipientIdentity].
+  ///
+  /// Rien dans le résultat ne désigne l'expéditeur, et deux appels sur le même
+  /// contenu donnent des octets différents — sans quoi le serveur relierait
+  /// les messages entre eux.
+  Uint8List sealedSeal(Uint8List recipientIdentity, Uint8List plaintext) {
+    final pk = _toNative(recipientIdentity);
+    final input = _toNative(plaintext);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.sealedSeal(pk, input, plaintext.length, outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(pk);
+      calloc.free(input);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
+  /// Ouvre une enveloppe scellée qui nous est destinée. Échoue si elle vise un
+  /// autre appareil OU si elle a été altérée — indiscernables, et c'est correct.
+  Uint8List sealedOpen(Uint8List sealed) {
+    final input = _toNative(sealed);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.sealedOpen(_engine, input, sealed.length, outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(input);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
   // ---- Code de verrouillage ----
 
   void appLockSet(String code) {

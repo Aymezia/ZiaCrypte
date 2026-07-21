@@ -188,6 +188,16 @@ class ZiaBindings {
             Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, Size),
             int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>,
                 int)>('zia_backup_import'),
+        sealedSeal = lib.lookupFunction<
+            Int32 Function(Pointer<Uint8>, Pointer<Uint8>, Size,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_sealed_seal'),
+        sealedOpen = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Uint8>, Size,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_sealed_open'),
         appLockSet = lib.lookupFunction<
             Int32 Function(Pointer<ZiaEngine>, Pointer<Char>),
             int Function(Pointer<ZiaEngine>, Pointer<Char>)>('zia_app_lock_set'),
@@ -263,6 +273,13 @@ class ZiaBindings {
       Pointer<Pointer<Uint8>>, Pointer<Size>) backupExport;
   final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int)
       backupImport;
+
+  /// Expéditeur scellé : chiffre à destination d'une identité SANS révéler
+  /// l'auteur, et ouvre une enveloppe qui nous est destinée.
+  final int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) sealedSeal;
+  final int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) sealedOpen;
 
   /// Code de verrouillage de l'application (Argon2id côté moteur).
   final int Function(Pointer<ZiaEngine>, Pointer<Char>) appLockSet;

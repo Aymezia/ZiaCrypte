@@ -126,6 +126,39 @@ class ApiClient {
     await _dio.delete<void>('/v1/devices/$deviceId');
   }
 
+  /// Publie (ou fait tourner) le jeton de remise de cet appareil.
+  ///
+  /// Le clair n'est rendu qu'ici, une seule fois : c'est au client de le
+  /// distribuer par le canal chiffré. Le serveur n'en garde que l'empreinte.
+  Future<String> publierJetonRemise() async {
+    final res =
+        await _dio.post<Map<String, dynamic>>('/v1/messages/delivery-token');
+    return res.data!['deliveryToken'] as String;
+  }
+
+  /// Dépose une enveloppe SCELLÉE. Aucune authentification n'est envoyée :
+  /// c'est tout l'objet — le serveur ne doit pas savoir qui dépose.
+  Future<void> deposerScelle({
+    required String deliveryToken,
+    required String recipientDeviceId,
+    required String clientMessageId,
+    required String sealedB64,
+  }) async {
+    // Client distinct, sans l'en-tête d'autorisation : le Dio partagé le
+    // joindrait automatiquement et trahirait l'expéditeur.
+    final anonyme = Dio(BaseOptions(
+      baseUrl: baseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 15),
+    ));
+    await anonyme.post<void>('/v1/messages/sealed', data: {
+      'deliveryToken': deliveryToken,
+      'recipientDeviceId': recipientDeviceId,
+      'clientMessageId': clientMessageId,
+      'sealed': sealedB64,
+    });
+  }
+
   /// Comptes bloqués par l'utilisateur courant.
   Future<List<Map<String, dynamic>>> blocages() async {
     final res = await _dio.get<List<dynamic>>('/v1/blocks');

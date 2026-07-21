@@ -120,6 +120,14 @@ class ZiaCryptoEngine {
   Future<void> backupImport(String passphrase, Uint8List data) =>
       _call('backupImport', {'phrase': passphrase, 'data': data});
 
+  /// Scelle un contenu à destination d'une clé d'identité.
+  Future<Uint8List> sealedSeal(Uint8List recipientIdentity, Uint8List plaintext) =>
+      _call('sealedSeal', {'pk': recipientIdentity, 'pt': plaintext});
+
+  /// Ouvre une enveloppe scellée destinée à cet appareil.
+  Future<Uint8List> sealedOpen(Uint8List sealed) =>
+      _call('sealedOpen', {'s': sealed});
+
   /// Pose le code de verrouillage de l'application.
   Future<void> appLockSet(String code) => _call('appLockSet', {'c': code});
 
@@ -271,6 +279,10 @@ class ZiaCryptoEngine {
       case 'backupImport':
         engine.backupImport(a['phrase'] as String, a['data'] as Uint8List);
         return null;
+      case 'sealedSeal':
+        return engine.sealedSeal(a['pk'] as Uint8List, a['pt'] as Uint8List);
+      case 'sealedOpen':
+        return engine.sealedOpen(a['s'] as Uint8List);
       case 'appLockSet':
         engine.appLockSet(a['c'] as String);
         return null;

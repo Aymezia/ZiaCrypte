@@ -154,7 +154,7 @@ class ChatService extends ChangeNotifier {
 
     if (Platform.isWindows) {
       fileName = 'zia_crypto.dll';
-      candidates = ['$exeDir\$fileName'];
+      candidates = ['$exeDir$fileName'];
     } else if (Platform.isMacOS) {
       fileName = 'libzia_crypto.dylib';
       candidates = ['$exeDir/../Frameworks/$fileName', '$exeDir/$fileName'];
@@ -416,9 +416,13 @@ class ChatService extends ChangeNotifier {
     _pinning = pinning;
 
     await _chargerAvatars();
+    await _chargerJetons();
     // Liste des blocages chargée à la connexion : sans elle, le menu
     // proposerait « Bloquer » à quelqu'un qui l'est déjà.
     listerBlocages().catchError((_) => <Map<String, dynamic>>[]);
+    // Notre jeton de remise, publié et annoncé : sans lui, personne ne peut
+    // nous écrire de façon scellée et le serveur continue de voir le graphe.
+    _publierJeton();
     await _loadBackfilled();
     await _loadConversations();
     _startPolling();
@@ -721,6 +725,75 @@ class ChatService extends ChangeNotifier {
     await g.engine.appLockClear();
   }
 
+  /// Jetons de remise connus, par identifiant d'appareil.
+  ///
+  /// Conservés dans le coffre chiffré : ce sont des secrets partagés, et les
+  /// perdre ferait simplement retomber sur le chemin authentifié — dégradation
+  /// silencieuse de la confidentialité, donc à éviter.
+  final Map<String, String> jetonsRemise = {};
+  static const _cleCoffreJetons = 'jetons_remise';
+
+  Future<void> _chargerJetons() async {
+    final g = _gateway;
+    if (g == null) return;
+    try {
+      final brut = await g.vaultRead(_cleCoffreJetons);
+      if (brut == null || brut.isEmpty) return;
+      final json = jsonDecode(utf8.decode(brut)) as Map<String, dynamic>;
+      jetonsRemise
+        ..clear()
+        ..addAll(json.map((k, v) => MapEntry(k, v as String)));
+    } catch (_) {
+      jetonsRemise.clear();
+    }
+  }
+
+  Future<void> _sauverJetons() async {
+    final g = _gateway;
+    if (g == null) return;
+    await g.vaultWrite(_cleCoffreJetons,
+        Uint8List.fromList(utf8.encode(jsonEncode(jetonsRemise))));
+  }
+
+  /// Notre propre jeton de remise, retenu pour pouvoir l'annoncer à chaque
+  /// nouvelle conversation.
+  String? _monJeton;
+
+  /// Conversations où notre jeton reste à annoncer. On diffère la diffusion à
+  /// la fin de l'ouverture des sessions : l'annoncer au milieu de la boucle
+  /// enverrait un message de contrôle à des appareils dont la session n'est pas
+  /// encore enregistrée.
+  final Set<String> _jetonAAnnoncer = {};
+
+  /// Publie notre jeton auprès du serveur, une fois par session.
+  ///
+  /// L'annonce aux correspondants se fait ailleurs, conversation par
+  /// conversation : une première version l'annonçait à la connexion, alors
+  /// qu'aucune conversation n'est encore chargée — le jeton n'atteignait
+  /// personne et le chemin scellé ne s'activait jamais.
+  Future<void> _publierJeton() async {
+    final api = _api;
+    if (api == null || deviceId == null || _monJeton != null) return;
+    try {
+      _monJeton = await api.publierJetonRemise();
+    } catch (_) {
+      // Le scellement est une amélioration, pas une condition de
+      // fonctionnement : son échec ne doit pas empêcher de communiquer.
+    }
+  }
+
+  /// Annonce notre jeton dans une conversation dont les sessions sont ouvertes.
+  Future<void> _annoncerJeton(Conversation conv) async {
+    final jeton = _monJeton;
+    if (jeton == null || conv.sessions.isEmpty) return;
+    try {
+      await _diffuserControle(
+          conv, '$_prefixeJeton${jsonEncode({'d': deviceId, 't': jeton})}');
+    } catch (_) {
+      // sans conséquence : on retombe sur le chemin authentifié
+    }
+  }
+
   /// Identifiants des comptes bloqués, gardés en mémoire pour l'affichage.
   final Set<String> bloques = {};
 
@@ -762,6 +835,17 @@ class ChatService extends ChangeNotifier {
     final api = _api;
     if (api == null) throw StateError('Session fermée.');
     await api.revoquerAppareil(id);
+  }
+
+  /// Diffuse notre jeton dans les conversations en attente.
+  Future<void> _viderFileJeton() async {
+    if (_jetonAAnnoncer.isEmpty || _monJeton == null) return;
+    final ids = _jetonAAnnoncer.toList();
+    _jetonAAnnoncer.clear();
+    for (final id in ids) {
+      final conv = _conversations[id];
+      if (conv != null) await _annoncerJeton(conv);
+    }
   }
 
   /// Établit une session avec chaque appareil d'un utilisateur qui n'en a pas
@@ -820,6 +904,11 @@ class ChatService extends ChangeNotifier {
       if (inconnu && dejaConnus > 0) {
         _annoncerAppareil(conv, targetUserId == userId);
       }
+
+      // Notre jeton de remise part dès qu'une session existe avec cet
+      // appareil : c'est le seul moment où on peut le lui transmettre de façon
+      // chiffrée, et sans lui il ne pourra jamais nous écrire de façon scellée.
+      _jetonAAnnoncer.add(conv.id);
 
       final theirBundle = PrekeyBundle(
         identityKey: theirIdentity,
@@ -970,6 +1059,14 @@ class ChatService extends ChangeNotifier {
   /// méritent son attention.
   static const _prefixeTtl = '__zia_ttl__:';
 
+  /// Jeton de remise, annoncé aux correspondants.
+  ///
+  /// Il ne circule QUE dans le canal chiffré, donc uniquement vers des
+  /// appareils avec qui une session existe déjà. Le détenir prouve qu'on a été
+  /// en contact — c'est exactement l'autorisation qu'on veut donner pour un
+  /// dépôt anonyme, sans révéler d'identité au serveur.
+  static const _prefixeJeton = '__zia_dtok__:';
+
   /// Un texte est-il un message de CONTRÔLE plutôt qu'un message à afficher ?
   ///
   /// Exposé aux tests parce que l'oubli d'un préfixe dans cette liste est un
@@ -1007,7 +1104,8 @@ class ChatService extends ChangeNotifier {
       t.startsWith(_prefixeSuppr) ||
       t.startsWith(_prefixeLu) ||
       t.startsWith(_prefixeAvatar) ||
-      t.startsWith(_prefixeTtl);
+      t.startsWith(_prefixeTtl) ||
+      t.startsWith(_prefixeJeton);
 
   /// Émission des accusés de lecture, pilotée par les préférences.
   bool accusesLectureActifs = false;
@@ -1186,6 +1284,20 @@ class ChatService extends ChangeNotifier {
   Future<void> _appliquerControle(
       Conversation conv, String texte, bool deMoi) async {
     try {
+      // Jeton de remise d'un correspondant : c'est ce qui permet de lui
+      // écrire ensuite SANS que le serveur sache que c'est nous.
+      if (texte.startsWith(_prefixeJeton)) {
+        final json = jsonDecode(texte.substring(_prefixeJeton.length))
+            as Map<String, dynamic>;
+        final appareil = json['d'] as String?;
+        final jeton = json['t'] as String?;
+        if (appareil != null && jeton != null) {
+          jetonsRemise[appareil] = jeton;
+          await _sauverJetons();
+        }
+        return;
+      }
+
       // Durée de vie modifiée par l'un ou l'autre.
       if (texte.startsWith(_prefixeTtl)) {
         final json = jsonDecode(texte.substring(_prefixeTtl.length))
@@ -1354,15 +1466,80 @@ class ChatService extends ChangeNotifier {
 
     final enc = await gateway.encrypt(sessionId, _encodePayload(text, null));
     final handshake = _pendingHandshakes['${conv.id}-$device'];
+    final entete = Envelope.packHeader(enc.header, handshake);
+
+    // Chemin SCELLÉ quand il est possible : le serveur n'apprend alors ni qui
+    // écrit, ni dans quelle conversation. Il faut pour cela connaître le jeton
+    // de remise du destinataire ET sa clé d'identité — donc avoir déjà été en
+    // contact. À défaut on retombe sur le chemin authentifié, qui fonctionne
+    // toujours : une dégradation vaut mieux qu'un message non remis.
+    final jeton = jetonsRemise[device];
+    final identite = _pinning?.forDevice(device)?.identityKey;
+    if (jeton != null && identite != null) {
+      try {
+        final interieur = utf8.encode(jsonEncode({
+          // L'expéditeur voyage À L'INTÉRIEUR : le destinataire doit savoir qui
+          // lui parle, c'est le serveur seul qu'on aveugle.
+          'sd': deviceId,
+          'su': userId,
+          'cv': conv.id,
+          'h': base64Encode(entete),
+          'c': base64Encode(enc.ciphertext),
+        }));
+        final scelle = await gateway.engine
+            .sealedSeal(identite, Uint8List.fromList(interieur));
+        await api.deposerScelle(
+          deliveryToken: jeton,
+          recipientDeviceId: device,
+          clientMessageId: _uuidV4(),
+          sealedB64: base64Encode(scelle),
+        );
+        _pendingHandshakes.remove('${conv.id}-$device');
+        await _saveSessions(conv);
+        return;
+      } catch (_) {
+        // Un échec du chemin scellé ne doit pas faire perdre le message : on
+        // reprend par le chemin authentifié ci-dessous. Le prix est que le
+        // serveur voit ce message-là — mais il arrive.
+      }
+    }
+
     await api.sendMessage(
       conversationId: conv.id,
       recipientDeviceId: device,
       clientMessageId: _uuidV4(),
-      headerB64: base64Encode(Envelope.packHeader(enc.header, handshake)),
+      headerB64: base64Encode(entete),
       ciphertextB64: base64Encode(enc.ciphertext),
     );
     _pendingHandshakes.remove('${conv.id}-$device');
     await _saveSessions(conv);
+  }
+
+  /// Ouvre une enveloppe scellée et la remet à la forme d'un message ordinaire.
+  ///
+  /// Renvoie null si l'enveloppe ne nous est pas destinée ou a été altérée —
+  /// les deux sont indiscernables, et c'est correct : l'authentification ne dit
+  /// pas laquelle des deux causes s'applique. On l'ignore en silence plutôt que
+  /// d'afficher une alerte, un tiers pouvant déposer n'importe quoi sur cette
+  /// route sans s'authentifier.
+  Future<Map<String, dynamic>?> _ouvrirScelle(Map<String, dynamic> brut) async {
+    final gateway = _gateway;
+    if (gateway == null) return null;
+    try {
+      final scelle = base64Decode(brut['ciphertext'] as String);
+      final clair = await gateway.engine.sealedOpen(scelle);
+      final json = jsonDecode(utf8.decode(clair)) as Map<String, dynamic>;
+      return {
+        ...brut,
+        'senderDeviceId': json['sd'],
+        'senderUserId': json['su'],
+        'conversationId': json['cv'],
+        'header': json['h'],
+        'ciphertext': json['c'],
+      };
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Intègre un lot d'historique reçu d'un autre de mes appareils.
@@ -1822,6 +1999,10 @@ class ChatService extends ChangeNotifier {
       _checkDeliveries();
       _syncSiblings();
       _balayerExpires();
+      // Jeton de remise en attente : diffusé dès qu'une session existe. Passé
+      // par la boucle plutôt qu'appelé au milieu de l'ouverture des sessions,
+      // où la session n'est pas encore enregistrée.
+      _viderFileJeton();
     });
     _connectRealtime();
   }
@@ -1905,7 +2086,16 @@ class ChatService extends ChangeNotifier {
       if (incoming.isEmpty) return;
 
       final touched = <Conversation>{};
-      for (final m in incoming) {
+      for (final brut in incoming) {
+        // Message SCELLÉ : le serveur ne sait pas qui l'a déposé. On ouvre
+        // l'enveloppe pour retrouver l'expéditeur, la conversation et
+        // l'en-tête, puis on reprend exactement le même chemin qu'un message
+        // ordinaire — le reste du traitement n'a pas à savoir lequel des deux
+        // transports a été emprunté.
+        final m = brut['sealed'] == true
+            ? await _ouvrirScelle(brut)
+            : brut;
+        if (m == null) continue; // enveloppe illisible : déjà signalée
         final conv = await _resolveConversation(m);
         final sender = m['senderDeviceId'] as String;
         final unpacked =
