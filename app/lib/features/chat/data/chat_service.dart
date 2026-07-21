@@ -615,6 +615,24 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Produit une sauvegarde chiffrée de cet appareil.
+  ///
+  /// Le moteur rassemble identité, prekeys et coffre local, puis rechiffre le
+  /// tout sous une clé dérivée de la phrase. Rien ne part sur le réseau : c'est
+  /// l'appelant qui décide où écrire les octets.
+  Future<Uint8List> exporterSauvegarde(String phrase) async {
+    final gateway = _gateway;
+    if (gateway == null) throw StateError('Connecte-toi d’abord.');
+    return gateway.engine.backupExport(phrase);
+  }
+
+  /// Restaure une sauvegarde dans le moteur de cet appareil.
+  Future<void> importerSauvegarde(String phrase, Uint8List octets) async {
+    final gateway = _gateway;
+    if (gateway == null) throw StateError('Connecte-toi d’abord.');
+    await gateway.engine.backupImport(phrase, octets);
+  }
+
   /// Appareils liés au compte, pour l'écran de gestion.
   Future<List<Map<String, dynamic>>> listerAppareils() async {
     final api = _api;

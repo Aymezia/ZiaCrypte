@@ -343,6 +343,43 @@ class NativeCryptoEngine {
     }
   }
 
+  // ---- Sauvegarde exportable ----
+
+  /// Produit une sauvegarde chiffrée sous [passphrase] (Argon2id).
+  ///
+  /// Contient l'identité, les prekeys et le coffre local. Le fichier peut être
+  /// copié et emporté : sa solidité ne tient plus qu'à la phrase choisie, et
+  /// l'interface doit le dire sans détour.
+  Uint8List backupExport(String passphrase) {
+    final phrase = passphrase.toNativeUtf8();
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.backupExport(_engine, phrase.cast<Char>(), outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      malloc.free(phrase);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
+  /// Restaure une sauvegarde dans CE moteur.
+  ///
+  /// Échoue si la phrase est incorrecte OU si le fichier a été altéré : les
+  /// deux sont indiscernables, et c'est voulu — l'authentification du chiffré
+  /// ne dit pas laquelle des deux causes s'applique.
+  void backupImport(String passphrase, Uint8List data) {
+    final phrase = passphrase.toNativeUtf8();
+    final input = _toNative(data);
+    try {
+      _check(_b.backupImport(_engine, phrase.cast<Char>(), input, data.length));
+    } finally {
+      malloc.free(phrase);
+      calloc.free(input);
+    }
+  }
+
   // ---- Vérification de contact ----
 
   /// Empreinte à 60 chiffres des deux clés d'identité.

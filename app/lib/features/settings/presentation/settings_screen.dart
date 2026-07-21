@@ -6,6 +6,7 @@ import '../../../core/config/app_settings.dart';
 import '../../chat/data/chat_service.dart';
 import '../../chat/presentation/identity_avatar.dart';
 import '../../../core/update/update_service.dart';
+import 'backup_sheet.dart';
 import 'devices_screen.dart';
 import 'two_factor_sheet.dart';
 import 'update_sheet.dart';
@@ -227,6 +228,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => DevicesScreen(service: s),
             )),
+          ),
+          ListTile(
+            leading: const Icon(Icons.save_alt),
+            title: const Text('Sauvegarde chiffrée'),
+            subtitle: const Text(
+                'Sans elle, perdre cet appareil c’est perdre ton historique'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => BackupSheet.show(context, s),
           ),
           ListTile(
             leading: Icon(Icons.logout, color: theme.colorScheme.error),

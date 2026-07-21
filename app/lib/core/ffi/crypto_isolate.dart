@@ -107,6 +107,19 @@ class ZiaCryptoEngine {
         'sig': signature,
       });
 
+  /// Produit une sauvegarde chiffrée sous une phrase de passe.
+  ///
+  /// Passe par l'isolat dédié comme le reste : Argon2id occupe un cœur pendant
+  /// une seconde ou deux, ce qui figerait l'interface s'il tournait sur le fil
+  /// principal.
+  Future<Uint8List> backupExport(String passphrase) =>
+      _call('backupExport', {'phrase': passphrase});
+
+  /// Restaure une sauvegarde. Échoue si la phrase est fausse ou le fichier
+  /// altéré — les deux sont indiscernables, et c'est voulu.
+  Future<void> backupImport(String passphrase, Uint8List data) =>
+      _call('backupImport', {'phrase': passphrase, 'data': data});
+
   /// Range une donnée chiffrée dans le coffre local de l'appareil.
   Future<void> vaultWrite(String name, Uint8List data) =>
       _call('vaultWrite', {'name': name, 'data': data});
@@ -242,6 +255,11 @@ class ZiaCryptoEngine {
           filePath: a['path'] as String,
           signature: a['sig'] as Uint8List,
         );
+      case 'backupExport':
+        return engine.backupExport(a['phrase'] as String);
+      case 'backupImport':
+        engine.backupImport(a['phrase'] as String, a['data'] as Uint8List);
+        return null;
       case 'vaultWrite':
         engine.vaultWrite(a['name'] as String, a['data'] as Uint8List);
         return null;

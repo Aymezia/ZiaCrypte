@@ -179,6 +179,15 @@ class ZiaBindings {
             Int32 Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>),
             int Function(Pointer<Uint8>, Pointer<Char>,
                 Pointer<Uint8>)>('zia_verify_file_signature'),
+        backupExport = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_backup_export'),
+        backupImport = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, Size),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>,
+                int)>('zia_backup_import'),
         safetyNumber = lib.lookupFunction<
             Int32 Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,
                 Pointer<Char>, Pointer<Char>),
@@ -234,6 +243,12 @@ class ZiaBindings {
   /// Vérifie la signature détachée d'un fichier (mise à jour).
   final int Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>)
       verifyFileSignature;
+
+  /// Sauvegarde chiffrée exportable, protégée par une phrase de passe.
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) backupExport;
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int)
+      backupImport;
 
   /// Empreinte des deux clés d'identité (60 chiffres + octet nul).
   final int Function(Pointer<Uint8>, Pointer<Char>, Pointer<Uint8>,
