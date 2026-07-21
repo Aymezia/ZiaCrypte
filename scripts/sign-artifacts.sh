@@ -29,6 +29,10 @@ OUTIL="$ROOT/crypto-engine/build/linux-system/tools/zia_sign_release"
 }
 [ -d "$DOSSIER" ] || { echo "ERREUR : dossier introuvable ($DOSSIER)." >&2; exit 2; }
 
+# Si la clé est chiffrée, l'outil demande la phrase À CHAQUE artefact : il est
+# relancé une fois par fichier. C'est volontairement laissé tel quel — retenir
+# la phrase entre deux appels supposerait de la garder en mémoire ou de la
+# passer en argument, où elle serait lisible par tout autre processus.
 echo ">> Signature des artefacts de $DOSSIER"
 signes=0
 for f in "$DOSSIER"/*; do
