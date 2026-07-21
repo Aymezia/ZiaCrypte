@@ -57,3 +57,34 @@ crypto-engine/crash-*
 
 # Clés de signature des releases : JAMAIS versionnées
 *.key
+
+# ---- Ajouts avant passage en public ----
+# Un .gitignore n'efface RIEN de ce qui est déjà commité : il empêche seulement
+# d'ajouter par accident. Ce qui suit couvre ce qui n'existe pas encore mais
+# arriverait naturellement à côté du dépôt.
+
+# Clé de signature, y compris chiffrée : elle donne l'exécution de code chez
+# tous les utilisateurs, et une phrase de passe se casse hors ligne.
+*.key.enc
+.ziacrypte-signing/
+
+# Sauvegardes utilisateur : un seul fichier contient identité, sessions et
+# tout l'historique d'un compte.
+*.ziabak
+
+# Signature d'application mobile
+*.jks
+*.keystore
+key.properties
+google-services.json
+GoogleService-Info.plist
+
+# Artefacts empaquetés
+*.apk
+*.aab
+*.ipa
+*.tar.gz
+
+# Environnements, sous toutes leurs formes
+.env.*
+!.env.example
