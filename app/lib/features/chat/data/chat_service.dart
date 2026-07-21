@@ -448,6 +448,10 @@ class ChatService extends ChangeNotifier {
     deviceId = null;
     _conversations.clear();
     _pendingHandshakes.clear();
+    // Le jeton de remise appartient à la session qui se ferme. Le conserver
+    // ferait annoncer au compte suivant celui du précédent.
+    _monJeton = null;
+    _jetonAnnonce.clear();
     activeConversationId = null;
     notifyListeners();
   }
@@ -759,11 +763,15 @@ class ChatService extends ChangeNotifier {
   /// nouvelle conversation.
   String? _monJeton;
 
-  /// Conversations où notre jeton reste à annoncer. On diffère la diffusion à
-  /// la fin de l'ouverture des sessions : l'annoncer au milieu de la boucle
-  /// enverrait un message de contrôle à des appareils dont la session n'est pas
-  /// encore enregistrée.
-  final Set<String> _jetonAAnnoncer = {};
+  /// Conversations où notre jeton a déjà été annoncé pendant cette session.
+  ///
+  /// On mémorise ce qui est FAIT, pas ce qui reste à faire. La version
+  /// précédente tenait une file alimentée uniquement à l'ouverture d'une
+  /// session neuve — or les sessions sont persistées : au deuxième lancement
+  /// aucune session n'est ouverte, la file restait donc vide et le jeton ne
+  /// partait jamais. Le chemin scellé ne pouvait s'activer que face à un
+  /// correspondant tout neuf, jamais sur une conversation déjà entamée.
+  final Set<String> _jetonAnnonce = {};
 
   /// Publie notre jeton auprès du serveur, une fois par session.
   ///
@@ -783,14 +791,20 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Annonce notre jeton dans une conversation dont les sessions sont ouvertes.
-  Future<void> _annoncerJeton(Conversation conv) async {
+  ///
+  /// Renvoie false si l'annonce n'a pas abouti, pour qu'elle soit retentée :
+  /// un jeton perdu dans une coupure réseau éteindrait le scellement jusqu'au
+  /// prochain lancement.
+  Future<bool> _annoncerJeton(Conversation conv) async {
     final jeton = _monJeton;
-    if (jeton == null || conv.sessions.isEmpty) return;
+    if (jeton == null || conv.sessions.isEmpty) return false;
     try {
       await _diffuserControle(
           conv, '$_prefixeJeton${jsonEncode({'d': deviceId, 't': jeton})}');
+      return true;
     } catch (_) {
       // sans conséquence : on retombe sur le chemin authentifié
+      return false;
     }
   }
 
@@ -837,14 +851,22 @@ class ChatService extends ChangeNotifier {
     await api.revoquerAppareil(id);
   }
 
-  /// Diffuse notre jeton dans les conversations en attente.
+  /// Diffuse notre jeton dans les conversations qui ne l'ont pas encore reçu.
+  ///
+  /// Parcourt TOUTES les conversations chargées, pas seulement celles dont on
+  /// vient d'ouvrir la session : c'est ce qui permet au chemin scellé de
+  /// s'activer sur des échanges déjà en cours.
   Future<void> _viderFileJeton() async {
-    if (_jetonAAnnoncer.isEmpty || _monJeton == null) return;
-    final ids = _jetonAAnnoncer.toList();
-    _jetonAAnnoncer.clear();
-    for (final id in ids) {
-      final conv = _conversations[id];
-      if (conv != null) await _annoncerJeton(conv);
+    // Publication retentée ici : elle échoue en silence à la connexion si le
+    // réseau n'est pas prêt, et sans nouvelle tentative le scellement resterait
+    // éteint pour toute la session.
+    if (_monJeton == null) await _publierJeton();
+    if (_monJeton == null) return;
+    for (final conv in _conversations.values.toList()) {
+      if (_jetonAnnonce.contains(conv.id) || conv.sessions.isEmpty) continue;
+      // Marqué seulement en cas de succès : un échec doit être retenté au tour
+      // suivant, pas oublié.
+      if (await _annoncerJeton(conv)) _jetonAnnonce.add(conv.id);
     }
   }
 
@@ -905,10 +927,10 @@ class ChatService extends ChangeNotifier {
         _annoncerAppareil(conv, targetUserId == userId);
       }
 
-      // Notre jeton de remise part dès qu'une session existe avec cet
-      // appareil : c'est le seul moment où on peut le lui transmettre de façon
-      // chiffrée, et sans lui il ne pourra jamais nous écrire de façon scellée.
-      _jetonAAnnoncer.add(conv.id);
+      // Un appareil de plus dans cette conversation : il n'a pas notre jeton.
+      // On redemande l'annonce, sinon il ne pourrait jamais nous écrire de
+      // façon scellée.
+      _jetonAnnonce.remove(conv.id);
 
       final theirBundle = PrekeyBundle(
         identityKey: theirIdentity,
