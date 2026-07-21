@@ -46,9 +46,20 @@ model User {
   // valide n'a pas été fourni, le second facteur n'est pas exigé.
   totpSecret    String?   @map("totp_secret")
   totpEnabledAt DateTime? @map("totp_enabled_at")
+  // Rôle. « admin » n'ouvre AUCUN accès aux messages : les routes
+  // d'administration ne touchent que des métadonnées, et rien dans le serveur
+  // ne peut déchiffrer quoi que ce soit — les clés n'y sont jamais passées.
+  role UserRole @default(user)
+
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
   deletedAt    DateTime? @map("deleted_at")
+
+  // Jeton de réinitialisation émis par un administrateur, à la demande de
+  // l'utilisateur. Stocké HACHÉ : l'administrateur le transmet une fois et le
+  // serveur ne peut pas le retrouver ensuite.
+  resetTokenHash String?   @map("reset_token_hash")
+  resetExpiresAt DateTime? @map("reset_expires_at")
 
   devices              Device[]
   webauthnCredentials  WebauthnCredential[]
@@ -256,6 +267,33 @@ model AuthSession {
   device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@map("auth_sessions")
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+/**
+ * Journal des actions d'administration.
+ *
+ * Distinct d'AuditLog : celui-ci n'est jamais purgé et ne peut être ni modifié
+ * ni supprimé par l'API. Un pouvoir sans trace n'est pas un pouvoir encadré —
+ * c'est ce registre qui rend une suppression de compte contestable après coup.
+ */
+model AdminAction {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String   @map("actor_user_id") @db.Uuid
+  action      String
+  // Cible conservée en clair (nom d'utilisateur) : après suppression du compte,
+  // l'identifiant ne renvoie plus à rien et la trace deviendrait illisible.
+  targetLabel String?  @map("target_label")
+  targetId    String?  @map("target_id") @db.Uuid
+  reason      String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("admin_actions")
 }
 
 model AuditLog {
