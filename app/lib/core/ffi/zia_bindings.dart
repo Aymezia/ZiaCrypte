@@ -198,6 +198,27 @@ class ZiaBindings {
                 Pointer<Pointer<Uint8>>, Pointer<Size>),
             int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
                 Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_sealed_open'),
+        senderKeyCreate = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_sender_key_create'),
+        senderKeyProcess = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
+                Pointer<Uint8>, Size),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
+                Pointer<Uint8>, int)>('zia_sender_key_process'),
+        senderKeyEncrypt = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, Size,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_sender_key_encrypt'),
+        senderKeyDecrypt = lib.lookupFunction<
+            Int32 Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
+                Pointer<Uint8>, Size, Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
+                Pointer<Uint8>, int, Pointer<Pointer<Uint8>>,
+                Pointer<Size>)>('zia_sender_key_decrypt'),
         appLockSet = lib.lookupFunction<
             Int32 Function(Pointer<ZiaEngine>, Pointer<Char>),
             int Function(Pointer<ZiaEngine>, Pointer<Char>)>('zia_app_lock_set'),
@@ -280,6 +301,18 @@ class ZiaBindings {
       Pointer<Pointer<Uint8>>, Pointer<Size>) sealedSeal;
   final int Function(Pointer<ZiaEngine>, Pointer<Uint8>, int,
       Pointer<Pointer<Uint8>>, Pointer<Size>) sealedOpen;
+
+  /// Clés d'expéditeur de groupe : une chaîne par groupe, distribuée une fois
+  /// par le canal pair-à-pair, puis UN chiffrement par message quel que soit le
+  /// nombre de destinataires.
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Pointer<Uint8>>,
+      Pointer<Size>) senderKeyCreate;
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
+      Pointer<Uint8>, int) senderKeyProcess;
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Uint8>, int,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) senderKeyEncrypt;
+  final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
+      Pointer<Uint8>, int, Pointer<Pointer<Uint8>>, Pointer<Size>) senderKeyDecrypt;
 
   /// Code de verrouillage de l'application (Argon2id côté moteur).
   final int Function(Pointer<ZiaEngine>, Pointer<Char>) appLockSet;

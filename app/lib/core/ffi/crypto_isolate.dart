@@ -124,6 +124,18 @@ class ZiaCryptoEngine {
   Future<Uint8List> sealedSeal(Uint8List recipientIdentity, Uint8List plaintext) =>
       _call('sealedSeal', {'pk': recipientIdentity, 'pt': plaintext});
 
+  Future<Uint8List> senderKeyCreate(String groupId) =>
+      _call('senderKeyCreate', {'g': groupId});
+
+  Future<void> senderKeyProcess(String groupId, String senderId, Uint8List distribution) =>
+      _call('senderKeyProcess', {'g': groupId, 's': senderId, 'd': distribution});
+
+  Future<Uint8List> senderKeyEncrypt(String groupId, Uint8List plaintext) =>
+      _call('senderKeyEncrypt', {'g': groupId, 'pt': plaintext});
+
+  Future<Uint8List> senderKeyDecrypt(String groupId, String senderId, Uint8List message) =>
+      _call('senderKeyDecrypt', {'g': groupId, 's': senderId, 'm': message});
+
   /// Ouvre une enveloppe scellée destinée à cet appareil.
   Future<Uint8List> sealedOpen(Uint8List sealed) =>
       _call('sealedOpen', {'s': sealed});
@@ -281,6 +293,17 @@ class ZiaCryptoEngine {
         return null;
       case 'sealedSeal':
         return engine.sealedSeal(a['pk'] as Uint8List, a['pt'] as Uint8List);
+      case 'senderKeyCreate':
+        return engine.senderKeyCreate(a['g'] as String);
+      case 'senderKeyProcess':
+        engine.senderKeyProcess(
+            a['g'] as String, a['s'] as String, a['d'] as Uint8List);
+        return null;
+      case 'senderKeyEncrypt':
+        return engine.senderKeyEncrypt(a['g'] as String, a['pt'] as Uint8List);
+      case 'senderKeyDecrypt':
+        return engine.senderKeyDecrypt(
+            a['g'] as String, a['s'] as String, a['m'] as Uint8List);
       case 'sealedOpen':
         return engine.sealedOpen(a['s'] as Uint8List);
       case 'appLockSet':

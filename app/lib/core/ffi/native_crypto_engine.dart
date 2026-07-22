@@ -403,6 +403,80 @@ class NativeCryptoEngine {
     }
   }
 
+  // ------------------------------------------------- clés d'expéditeur (groupes)
+
+  /// Crée (ou fait tourner) notre clé d'expéditeur pour [groupId] et renvoie le
+  /// message de distribution à transmettre à chaque membre par le canal chiffré.
+  ///
+  /// À rappeler quand un membre part : sans rotation, il continuerait de lire.
+  Uint8List senderKeyCreate(String groupId) {
+    final g = groupId.toNativeUtf8();
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.senderKeyCreate(_engine, g.cast<Char>(), outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(g);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
+  /// Enregistre la clé d'expéditeur d'un membre, reçue par le canal chiffré.
+  void senderKeyProcess(String groupId, String senderId, Uint8List distribution) {
+    final g = groupId.toNativeUtf8();
+    final sid = senderId.toNativeUtf8();
+    final input = _toNative(distribution);
+    try {
+      _check(_b.senderKeyProcess(
+          _engine, g.cast<Char>(), sid.cast<Char>(), input, distribution.length));
+    } finally {
+      calloc.free(g);
+      calloc.free(sid);
+      calloc.free(input);
+    }
+  }
+
+  /// Chiffre UNE seule fois pour tout le groupe.
+  Uint8List senderKeyEncrypt(String groupId, Uint8List plaintext) {
+    final g = groupId.toNativeUtf8();
+    final input = _toNative(plaintext);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.senderKeyEncrypt(
+          _engine, g.cast<Char>(), input, plaintext.length, outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(g);
+      calloc.free(input);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
+  /// Déchiffre un message de groupe. La signature de l'auteur est vérifiée
+  /// côté moteur AVANT tout déchiffrement.
+  Uint8List senderKeyDecrypt(String groupId, String senderId, Uint8List message) {
+    final g = groupId.toNativeUtf8();
+    final sid = senderId.toNativeUtf8();
+    final input = _toNative(message);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.senderKeyDecrypt(_engine, g.cast<Char>(), sid.cast<Char>(), input,
+          message.length, outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(g);
+      calloc.free(sid);
+      calloc.free(input);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
   /// Ouvre une enveloppe scellée qui nous est destinée. Échoue si elle vise un
   /// autre appareil OU si elle a été altérée — indiscernables, et c'est correct.
   Uint8List sealedOpen(Uint8List sealed) {
