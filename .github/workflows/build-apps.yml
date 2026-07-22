@@ -1,13 +1,18 @@
 name: build-apps
 
 # Construit l'application de bureau pour les plateformes qu'on ne peut PAS
-# compiler depuis Linux (Windows exige MSVC, macOS exige Xcode). Déclenchable à
-# la main, et automatiquement à la publication d'une release — les artefacts y
-# sont alors attachés.
-
-# Le jeton par défaut est en lecture seule sur les releases : sans cette
-# permission, les étapes « Attach to release » échouent en HTTP 403 alors que
-# les binaires ont été construits correctement, et la release part incomplète.
+# compiler depuis Linux (Windows exige MSVC, macOS exige Xcode).
+#
+# Déclenché UNIQUEMENT à la main (workflow_dispatch), et en pratique par
+# scripts/release.sh, qui l'attend, rapatrie les paquets, les fait signer, puis
+# publie la release déjà complète.
+#
+# Pourquoi PAS « à la publication d'une release » : la signature se fait hors
+# CI (la clé privée ne monte jamais sur un runner). Si ce workflow se relançait
+# à la publication, il reconstruirait des zips aux octets DIFFÉRENTS et les
+# remplacerait sur la release — les signatures déposées juste avant ne
+# correspondraient plus. release.sh construit donc AVANT de publier, et rien ne
+# doit reconstruire APRÈS.
 permissions:
   contents: write
 
@@ -18,8 +23,6 @@ env:
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
 
 jobs:
   # Le moteur pour Windows est cross-compilé depuis Linux avec MinGW et lié
@@ -101,12 +104,6 @@ jobs:
           name: ziacrypte-windows-x64-app
           path: ziacrypte-windows-x64-app.zip
 
-      - name: Attach to release
-        if: github.event_name == 'release'
-        run: gh release upload ${{ github.event.release.tag_name }} ziacrypte-windows-x64-app.zip --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   macos:
     name: Application macOS
     runs-on: macos-latest
@@ -149,9 +146,3 @@ jobs:
         with:
           name: ziacrypte-macos-app
           path: ziacrypte-macos-x64-app.zip
-
-      - name: Attach to release
-        if: github.event_name == 'release'
-        run: gh release upload ${{ github.event.release.tag_name }} ziacrypte-macos-x64-app.zip --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
