@@ -157,6 +157,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// Saisit le statut personnel.
+  ///
+  /// Une simple boîte de dialogue : le statut est une phrase, pas un écran.
+  Future<void> _modifierStatut() async {
+    final s = widget.service;
+    final champ = TextEditingController(text: s.statutDe(s.userId) ?? '');
+    final valeur = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Statut'),
+        content: TextField(
+          controller: champ,
+          autofocus: true,
+          maxLength: ChatService.statutMax,
+          decoration: const InputDecoration(
+            hintText: 'Disponible, en réunion, en vacances…',
+            helperText: 'Chiffré : seuls tes correspondants le voient',
+            helperMaxLines: 2,
+          ),
+          onSubmitted: (v) => Navigator.pop(context, v),
+        ),
+        actions: [
+          // Effacer plutôt que « vider le champ puis valider » : retirer son
+          // statut est une action à part entière, elle mérite un bouton.
+          TextButton(
+            onPressed: () => Navigator.pop(context, ''),
+            child: const Text('Effacer'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, champ.text),
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+    champ.dispose();
+    if (valeur == null) return;
+    await s.definirStatut(valeur);
+  }
+
   Future<String?> _demanderChemin() async {
     final ctrl = TextEditingController();
     return showDialog<String>(
@@ -286,6 +330,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : 'Chiffrée comme un message : le serveur ne la voit pas'),
               trailing: const Icon(Icons.chevron_right),
               onTap: s.busy ? null : _choisirPhoto,
+            ),
+          ),
+          ListenableBuilder(
+            listenable: s,
+            builder: (context, _) => ListTile(
+              leading: const Icon(Icons.mood_outlined),
+              title: const Text('Statut'),
+              subtitle: Text(s.statutDe(s.userId) ??
+                  'Aucun — chiffré comme un message, jamais lu par le serveur'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _modifierStatut,
             ),
           ),
           ListTile(

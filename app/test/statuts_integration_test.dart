@@ -1,4 +1,10 @@
-// Test d'intégration : la présence, entre DEUX clients réels.
+// Test d'intégration : les statuts, entre DEUX clients réels.
+//
+// Deux choses sous ce nom : la présence (« en ligne »), qui passe par la
+// passerelle, et le statut personnel (« En réunion »), qui passe par le canal
+// chiffré. Elles partagent ce banc d'essai parce qu'elles partagent la même
+// promesse : rien ne sort sans que l'utilisateur l'ait voulu, et le serveur
+// n'apprend rien de plus qu'il ne savait déjà.
 //
 // ## Pourquoi ce test existe
 //
@@ -54,7 +60,7 @@ void main() {
   final libPath = Platform.environment['ZIA_CRYPTO_LIB'];
   final moteurDispo = libPath != null && File(libPath).existsSync();
 
-  group('Présence de bout en bout (deux clients)', () {
+  group('Statuts de bout en bout (deux clients)', () {
     late ChatService alice;
     late ChatService bob;
     bool pret = false;
@@ -119,6 +125,67 @@ void main() {
       bob.partagePresenceActif = false;
       expect(await _attendre(() => !alice.enLigneDans(conv.id)), isTrue,
           reason: 'le retrait du consentement ne s’applique pas');
+
+      await alice.logout();
+      await bob.logout();
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('le statut personnel voyage chiffré, et s’efface', () async {
+      if (!moteurDispo) {
+        markTestSkipped('ZIA_CRYPTO_LIB absent');
+        return;
+      }
+      if (!_dedie) {
+        markTestSkipped(
+            'lance scripts/run-integration-tests.sh (serveur dédié requis)');
+        return;
+      }
+      if (!pret) {
+        markTestSkipped('serveur d’essai injoignable sur $_serveur');
+        return;
+      }
+
+      final suffixe = DateTime.now().microsecondsSinceEpoch;
+      final nomAlice = 'sta_a_$suffixe';
+      final nomBob = 'sta_b_$suffixe';
+
+      await alice.registerAndConnect(
+          user: nomAlice, password: 'password123', serverUrl: _serveur);
+      await bob.registerAndConnect(
+          user: nomBob, password: 'password123', serverUrl: _serveur);
+      expect(alice.connected, isTrue, reason: alice.error ?? '');
+      expect(bob.connected, isTrue, reason: bob.error ?? '');
+      final idAlice = alice.userId!;
+
+      await alice.startChatWith(nomBob);
+      final conv = alice.active;
+      expect(await _attendre(() => conv!.sessions.isNotEmpty), isTrue,
+          reason: 'aucune session ouverte avec Bob');
+
+      await alice.definirStatut('En réunion');
+      expect(await _attendre(() => bob.statutDe(idAlice) == 'En réunion'), isTrue,
+          reason: 'le statut n’a pas traversé le canal chiffré');
+
+      // Le statut ne doit JAMAIS apparaître comme un message dans le fil : il
+      // porte un préfixe de contrôle, et un préfixe oublié se voit ici.
+      final convBob = bob.conversations.firstWhere((c) => c.messages.isNotEmpty,
+          orElse: () => bob.conversations.first);
+      expect(convBob.messages.any((m) => m.text.contains('__zia_status__')),
+          isFalse,
+          reason: 'le message de contrôle brut s’affiche dans la conversation');
+
+      // Longueur bornée à la RÉCEPTION : l'appareil d'en face décide ce qu'il
+      // envoie, et on ne veut pas d'un statut de dix lignes dans un en-tête.
+      await alice.definirStatut('x' * 200);
+      expect(
+          await _attendre(
+              () => (bob.statutDe(idAlice)?.length ?? 0) == ChatService.statutMax),
+          isTrue,
+          reason: 'statut reçu non borné : ${bob.statutDe(idAlice)?.length}');
+
+      await alice.definirStatut('');
+      expect(await _attendre(() => bob.statutDe(idAlice) == null), isTrue,
+          reason: 'effacer son statut ne l’efface pas chez le correspondant');
 
       await alice.logout();
       await bob.logout();

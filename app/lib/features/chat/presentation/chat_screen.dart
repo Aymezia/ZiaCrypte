@@ -494,7 +494,10 @@ class _ChatScreenState extends State<ChatScreen> {
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(
                         last == null
-                            ? 'Aucun message'
+                            // Une conversation sans message montre le statut
+                            // du correspondant plutôt qu'une ligne vide — sans
+                            // jamais recouvrir un vrai message.
+                            ? (s.statutDe(c.peerUserId) ?? 'Aucun message')
                             : '${last.mine ? "Vous : " : ""}${last.text}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -704,6 +707,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final verified = identities.isNotEmpty &&
         identities.every((i) => i.verified) &&
         !hasPendingAlert;
+    // Pas de statut sur un groupe : il en faudrait un par membre, et la place
+    // d'un en-tête n'en porte qu'un.
+    final statut = conv.isGroup ? null : s.statutDe(conv.peerUserId);
 
     return InkWell(
       onTap: () => VerificationSheet.show(context, s),
@@ -734,11 +740,20 @@ class _ChatScreenState extends State<ChatScreen> {
                       ? theme.colorScheme.primary
                       : theme.colorScheme.onSurfaceVariant),
               const SizedBox(width: 4),
-              Text(
-                verified
-                    ? 'Chiffré · contact vérifié'
-                    : 'Chiffré de bout en bout · appuyer pour vérifier',
-                style: theme.textTheme.bodySmall,
+              // Le statut du correspondant prend la place du rappel de
+              // chiffrement quand il y en a un : la ligne ne peut pas porter
+              // les deux, et le cadenas — qui reste — dit déjà l'essentiel. Le
+              // texte complet revient dès que le statut disparaît.
+              Flexible(
+                child: Text(
+                  statut ??
+                      (verified
+                          ? 'Chiffré · contact vérifié'
+                          : 'Chiffré de bout en bout · appuyer pour vérifier'),
+                  style: theme.textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),

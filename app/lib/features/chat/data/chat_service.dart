@@ -509,6 +509,7 @@ class ChatService extends ChangeNotifier {
     _pinning = pinning;
 
     await _chargerAvatars();
+    await _chargerStatuts();
     await _chargerJetons();
     // Liste des blocages chargée à la connexion : sans elle, le menu
     // proposerait « Bloquer » à quelqu'un qui l'est déjà.
@@ -544,6 +545,7 @@ class ChatService extends ChangeNotifier {
     _pendingHandshakes.clear();
     _enLigne.clear();
     _abonnementPresence = {};
+    statuts.clear();
     // Le jeton de remise appartient à la session qui se ferme. Le conserver
     // ferait annoncer au compte suivant celui du précédent.
     _monJeton = null;
@@ -694,6 +696,15 @@ class ChatService extends ChangeNotifier {
       await _restoreSessions(conv);
       await _openSessionsWith(conv, peerUserId);
       if (userId != null) await _openSessionsWith(conv, userId!);
+
+      // Nouveau correspondant : il n'a jamais reçu notre statut, qui n'est
+      // diffusé qu'au moment où on le change. Sans cette annonce, il ne le
+      // verrait qu'à la prochaine modification — donc peut-être jamais.
+      final mien = statutDe(userId);
+      if (mien != null) {
+        await _diffuserControle(
+            conv, '$_prefixeStatut${jsonEncode({'t': mien})}');
+      }
 
       await _saveConversations();
       await _saveSessions(conv);
@@ -1272,6 +1283,22 @@ class ChatService extends ChangeNotifier {
   /// Distribution d'une clé d'expéditeur de groupe (phase 37).
   static const _prefixeCleGroupe = '__zia_skey__:';
 
+  /// Statut personnel (« Disponible », « En réunion »…).
+  ///
+  /// ## Pourquoi il ne va pas dans la table des comptes
+  ///
+  /// C'est le chemin qu'ont pris toutes les autres messageries : une colonne
+  /// `status` à côté du pseudo, lisible par l'hébergeur. Une phrase écrite
+  /// par soi-même sur soi-même en dit souvent plus long qu'un carnet
+  /// d'adresses — « à l'hôpital jusqu'à vendredi », « nouveau numéro », un
+  /// prénom, une ville. Elle suit donc le chemin de la photo de profil : le
+  /// canal chiffré, et rien d'autre.
+  ///
+  /// Conséquence assumée, la même que pour l'avatar : seules les personnes
+  /// avec qui une conversation est ouverte voient le statut. Un annuaire
+  /// consultable par tous supposerait de le livrer au serveur.
+  static const _prefixeStatut = '__zia_status__:';
+
   /// Un texte est-il un message de CONTRÔLE plutôt qu'un message à afficher ?
   ///
   /// Exposé aux tests parce que l'oubli d'un préfixe dans cette liste est un
@@ -1294,6 +1321,7 @@ class ChatService extends ChangeNotifier {
     // liste — le test qui parcourt les préfixes ne les couvrait donc pas.
     _prefixeJeton,
     _prefixeCleGroupe,
+    _prefixeStatut,
   ];
 
   /// Encode l'annonce d'une photo de profil. Exposé aux tests : c'est la
@@ -1315,7 +1343,8 @@ class ChatService extends ChangeNotifier {
       t.startsWith(_prefixeAvatar) ||
       t.startsWith(_prefixeTtl) ||
       t.startsWith(_prefixeJeton) ||
-      t.startsWith(_prefixeCleGroupe);
+      t.startsWith(_prefixeCleGroupe) ||
+      t.startsWith(_prefixeStatut);
 
   /// Émission des accusés de lecture, pilotée par les préférences.
   bool accusesLectureActifs = false;
@@ -1372,6 +1401,80 @@ class ChatService extends ChangeNotifier {
   /// chiffré du moteur — jamais sur le serveur.
   final Map<String, AttachmentRef> avatars = {};
   static const _cleCoffreAvatars = 'avatars_contacts';
+
+  /// Statuts personnels connus, par identifiant de compte — le sien compris.
+  ///
+  /// Dans le coffre chiffré du moteur, pas dans les préférences : c'est du
+  /// contenu reçu de correspondants, au même titre qu'un message, et les
+  /// préférences sont un simple fichier JSON en clair.
+  final Map<String, String> statuts = {};
+  static const _cleCoffreStatuts = 'statuts_contacts';
+
+  /// Longueur maximale d'un statut.
+  ///
+  /// Une phrase, pas un billet : au-delà, l'affichage tronque de toute façon,
+  /// et un champ long invite à y mettre ce qui devrait rester dans un message.
+  static const statutMax = 80;
+
+  /// Statut d'un compte, ou null s'il n'en a pas annoncé.
+  String? statutDe(String? user) {
+    if (user == null) return null;
+    final s = statuts[user];
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  /// Définit son statut et l'annonce à ses correspondants.
+  ///
+  /// Une chaîne vide efface le statut : l'annonce part quand même, sinon les
+  /// correspondants continueraient d'afficher l'ancien indéfiniment.
+  Future<void> definirStatut(String texte) async {
+    final moi = userId;
+    if (moi == null) return;
+    final propre = texte.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final borne = propre.length > statutMax
+        ? propre.substring(0, statutMax)
+        : propre;
+    if (borne == (statuts[moi] ?? '')) return;
+
+    if (borne.isEmpty) {
+      statuts.remove(moi);
+    } else {
+      statuts[moi] = borne;
+    }
+    await _sauverStatuts();
+    notifyListeners();
+
+    final charge = '$_prefixeStatut${jsonEncode({'t': borne})}';
+    for (final conv in _conversations.values) {
+      await _diffuserControle(conv, charge);
+    }
+  }
+
+  Future<void> _chargerStatuts() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    try {
+      final brut = await gateway.vaultRead(_cleCoffreStatuts);
+      if (brut == null || brut.isEmpty) return;
+      final json = jsonDecode(utf8.decode(brut)) as Map<String, dynamic>;
+      statuts.clear();
+      json.forEach((user, texte) {
+        if (texte is String && texte.isNotEmpty) statuts[user] = texte;
+      });
+      notifyListeners();
+    } catch (_) {
+      // Registre illisible : on repart à vide. Les statuts réapparaîtront à la
+      // prochaine annonce, comme les avatars.
+      statuts.clear();
+    }
+  }
+
+  Future<void> _sauverStatuts() async {
+    final gateway = _gateway;
+    if (gateway == null) return;
+    await gateway.vaultWrite(_cleCoffreStatuts,
+        Uint8List.fromList(utf8.encode(jsonEncode(statuts))));
+  }
 
   final Map<String, Uint8List> _photos = {};
   final Set<String> _photosEnCours = {};
@@ -1602,6 +1705,30 @@ class ChatService extends ChangeNotifier {
           // croit condamnés. Un réglage partagé doit être visible des deux.
           _annoncerTtl(conv, secondes, deMoi);
           await _saveHistory(conv);
+          notifyListeners();
+        }
+        return;
+      }
+
+      // Statut personnel annoncé par un correspondant (ou par un de mes
+      // propres appareils, pour que le mien me suive d'un appareil à l'autre).
+      if (texte.startsWith(_prefixeStatut)) {
+        final json = jsonDecode(texte.substring(_prefixeStatut.length))
+            as Map<String, dynamic>;
+        final valeur = (json['t'] as String? ?? '').trim();
+        final proprietaire = deMoi ? userId : conv.peerUserId;
+        if (proprietaire != null) {
+          // Borné à la réception AUSSI : la longueur envoyée est décidée par
+          // l'appareil d'en face, dont on ne contrôle pas le code.
+          final borne = valeur.length > statutMax
+              ? valeur.substring(0, statutMax)
+              : valeur;
+          if (borne.isEmpty) {
+            statuts.remove(proprietaire);
+          } else {
+            statuts[proprietaire] = borne;
+          }
+          await _sauverStatuts();
           notifyListeners();
         }
         return;
@@ -2373,6 +2500,7 @@ class ChatService extends ChangeNotifier {
     // mieux vaut ne rien afficher qu'afficher une présence périmée.
     _enLigne.clear();
     _abonnementPresence = {};
+    statuts.clear();
     notifyListeners();
     Future<void>.delayed(const Duration(seconds: 3), () {
       if (_api != null && _socket == null) _connectRealtime();
