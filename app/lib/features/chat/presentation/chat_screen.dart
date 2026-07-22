@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/config/app_settings.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/update/update_notifier.dart';
 import '../../../core/update/update_service.dart';
 import '../../settings/presentation/settings_screen.dart';
@@ -386,12 +387,24 @@ class _ChatScreenState extends State<ChatScreen> {
               Text(s.username ?? 'ZiaCrypte'),
               Row(
                 children: [
-                  Icon(
-                    s.realtime ? Icons.bolt_rounded : Icons.schedule_rounded,
-                    size: 12,
-                    color: theme.colorScheme.onSurfaceVariant,
+                  // Pastille en ligne : verte et nimbée quand la liaison temps
+                  // réel est établie, orangée sinon. Un point qui respire en dit
+                  // plus long qu'une icône, du premier coup d'œil.
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: s.realtime
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.tertiary,
+                      boxShadow: s.realtime
+                          ? ZiaTheme.glow(theme.colorScheme.primary,
+                              opacity: 0.6, blur: 8)
+                          : null,
+                    ),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   Text(
                     s.realtime ? 'Temps réel' : 'Reconnexion…',
                     style: theme.textTheme.bodySmall,
@@ -862,9 +875,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _bulle(ThemeData theme, ChatMessage m, bool suiteAvant, bool suiteApres) {
     final mien = m.mine;
-    final fond = mien
-        ? theme.colorScheme.primary
-        : theme.colorScheme.surfaceContainerHighest;
     final encre =
         mien ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
 
@@ -878,11 +888,21 @@ class _ChatScreenState extends State<ChatScreen> {
       bottomRight: mien ? (suiteApres ? petit : grand) : grand,
     );
 
+    // Mes messages portent le dégradé d'accent et un halo discret ; ceux reçus
+    // gardent une surface neutre pour que la conversation reste lisible et que
+    // ce soit MON propos qui ressorte, pas un mur lumineux des deux côtés.
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 4),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       constraints: const BoxConstraints(maxWidth: 520),
-      decoration: BoxDecoration(color: fond, borderRadius: rayons),
+      decoration: BoxDecoration(
+        color: mien ? null : theme.colorScheme.surfaceContainerHighest,
+        gradient: mien ? ZiaTheme.accentGradient(theme.colorScheme) : null,
+        borderRadius: rayons,
+        boxShadow: mien
+            ? ZiaTheme.glow(theme.colorScheme.primary, opacity: 0.22, blur: 12)
+            : null,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1200,6 +1220,37 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Bouton d'envoi : disque en dégradé d'accent, halo quand il est actif —
+  /// éteint et neutre tant que la session n'est pas prête, pour ne pas inviter
+  /// à cliquer sur un envoi qui n'aboutirait pas.
+  Widget _boutonEnvoi(ThemeData theme, bool actif) {
+    final c = theme.colorScheme;
+    return Semantics(
+      button: true,
+      label: 'Envoyer',
+      child: Material(
+        color: Colors.transparent,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: actif ? _send : null,
+          child: Ink(
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: actif ? ZiaTheme.accentGradient(c) : null,
+              color: actif ? null : c.surfaceContainerHighest,
+              boxShadow: actif ? ZiaTheme.glow(c.primary, opacity: 0.4) : null,
+            ),
+            child: Icon(Icons.send_rounded,
+                size: 20,
+                color: actif ? c.onPrimary : c.onSurfaceVariant),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _messagesAndComposer(ThemeData theme, ChatService s) {
     final conv = s.active!;
     return Column(
@@ -1284,11 +1335,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: conv.ready ? _send : null,
-                  icon: const Icon(Icons.send_rounded),
-                  padding: const EdgeInsets.all(14),
-                ),
+                _boutonEnvoi(theme, conv.ready),
               ],
             ),
           ),

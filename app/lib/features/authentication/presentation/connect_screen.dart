@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../chat/data/chat_service.dart';
 
 /// Écran d'entrée : reconnexion au compte de l'appareil, ou création d'un compte.
@@ -75,7 +76,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      body: Center(
+      body: DecoratedBox(
+        decoration: ZiaTheme.backgroundDecoration(theme.colorScheme),
+        child: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
           child: ConstrainedBox(
@@ -91,13 +94,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(Icons.lock_rounded,
-                          size: 56, color: theme.colorScheme.primary),
-                      const SizedBox(height: 16),
+                      Center(child: _logoHero(theme)),
+                      const SizedBox(height: 20),
                       Text('ZiaCrypte',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.headlineMedium
-                              ?.copyWith(fontWeight: FontWeight.w600)),
+                              ?.copyWith(fontWeight: FontWeight.w700)),
                       const SizedBox(height: 4),
                       Text(
                         switch (_mode) {
@@ -270,7 +272,24 @@ class _ConnectScreenState extends State<ConnectScreen> {
             ),
           ),
         ),
+        ),
       ),
+    );
+  }
+
+  /// Logo héros : un cadenas sur un disque en dégradé d'accent, nimbé. C'est la
+  /// première chose que l'on voit ; elle donne le ton « chiffré, moderne ».
+  Widget _logoHero(ThemeData theme) {
+    final c = theme.colorScheme;
+    return Container(
+      width: 92,
+      height: 92,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: ZiaTheme.accentGradient(c),
+        boxShadow: ZiaTheme.glow(c.primary, opacity: 0.45, blur: 28),
+      ),
+      child: Icon(Icons.lock_rounded, size: 44, color: c.onPrimary),
     );
   }
 

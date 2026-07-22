@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/config/app_settings.dart';
+import 'core/theme/app_theme.dart';
 import 'features/authentication/presentation/connect_screen.dart';
 import 'features/authentication/presentation/onboarding_screen.dart';
 import 'features/chat/data/chat_service.dart';
@@ -94,24 +95,14 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF2F6D5C); // vert profond, sobre
     return ListenableBuilder(
       listenable: _settings,
       builder: (context, _) => MaterialApp(
         title: 'ZiaCrypte',
         debugShowCheckedModeBanner: false,
         themeMode: _settings.themeMode,
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: seed),
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: seed,
-            brightness: Brightness.dark,
-          ),
-          useMaterial3: true,
-        ),
+        theme: ZiaTheme.light(),
+        darkTheme: ZiaTheme.dark(),
         home: ListenableBuilder(
           listenable: _service,
           builder: (context, _) {

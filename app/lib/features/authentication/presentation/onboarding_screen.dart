@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/theme/app_theme.dart';
+
 /// Deux écrans d'accueil, montrés une seule fois avant le premier compte.
 ///
 /// Ils ne vendent pas la fonctionnalité : ils expliquent ce que l'application
@@ -29,7 +31,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      body: SafeArea(
+      body: DecoratedBox(
+        decoration: ZiaTheme.backgroundDecoration(theme.colorScheme),
+        child: SafeArea(
         child: Column(
           children: [
             Expanded(
@@ -82,6 +86,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -133,13 +138,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           children: [
             Center(
               child: Container(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer,
+                  gradient: ZiaTheme.accentGradient(theme.colorScheme),
                   shape: BoxShape.circle,
+                  boxShadow: ZiaTheme.glow(theme.colorScheme.primary,
+                      opacity: 0.4, blur: 26),
                 ),
                 child: Icon(icone,
-                    size: 44, color: theme.colorScheme.onPrimaryContainer),
+                    size: 44, color: theme.colorScheme.onPrimary),
               ),
             ),
             const SizedBox(height: 28),
