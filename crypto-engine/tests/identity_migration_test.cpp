@@ -14,6 +14,7 @@
 // v1 maintenant que l'écriture produit du v2.
 
 #include "storage/identity_store.hpp"
+#include "storage/secure_key_store.hpp"
 #include "engine_internal.hpp"
 #include "primitives/primitives.hpp"
 
@@ -25,6 +26,31 @@
 #include <vector>
 
 using namespace zia::crypto;
+
+/* Coffre factice.
+ *
+ * identity_store.cpp référence platform_key_store() pour CHIFFRER le fichier,
+ * mais ce test ne touche qu'au sérialiseur : rien n'est écrit sur disque, donc
+ * aucune clé maîtresse n'est nécessaire. Fournir ce stub évite de compiler le
+ * coffre natif de chaque plateforme dans un test qui ne s'en sert pas — c'est
+ * précisément ce qui cassait la compilation macOS, où le backend n'était pas
+ * ajouté à la cible. */
+namespace zia::crypto::storage {
+namespace {
+class CoffreFactice final : public SecureKeyStore {
+ public:
+  bool has_master_key() override { return false; }
+  bool generate_and_store_master_key(SecureBuffer&) override { return false; }
+  bool load_master_key(SecureBuffer&) override { return false; }
+  bool delete_master_key() override { return false; }
+};
+} // namespace
+
+SecureKeyStore& platform_key_store() {
+  static CoffreFactice coffre;
+  return coffre;
+}
+} // namespace zia::crypto::storage
 
 namespace {
 

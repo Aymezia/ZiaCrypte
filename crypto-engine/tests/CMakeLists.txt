@@ -41,12 +41,11 @@ add_executable(zia_identity_migration_test
     ${CMAKE_SOURCE_DIR}/src/storage/identity_store.cpp
     ${CMAKE_SOURCE_DIR}/src/primitives/primitives.cpp)
 target_include_directories(zia_identity_migration_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+# Pas de backend natif ici : le test fournit un coffre factice, puisqu'il ne
+# sérialise qu'en mémoire. Compiler le coffre de chaque plateforme dans cette
+# cible aurait demandé de dupliquer la sélection par système — et c'est
+# exactement ce qui a cassé la compilation macOS.
 target_link_libraries(zia_identity_migration_test PRIVATE zia_crypto zia::sodium zia::oqs)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_sources(zia_identity_migration_test
-        PRIVATE ${CMAKE_SOURCE_DIR}/platform/linux/secure_key_store_linux.cpp)
-    target_link_libraries(zia_identity_migration_test PRIVATE PkgConfig::LIBSECRET)
-endif()
 add_test(NAME identity_migration COMMAND zia_identity_migration_test)
 
 # Sauvegarde exportable : deux moteurs, deux dossiers de stockage. Le montage
