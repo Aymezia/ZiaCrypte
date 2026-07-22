@@ -60,15 +60,47 @@ tar xzf "$WORK/libsodium.tar.gz" -C "$WORK"
 )
 SODIUM="$WORK/sodium"
 
+# --- liboqs (ML-KEM-768, PQXDH) ---
+# Même traitement que libsodium : compilé pour la cible et lié STATIQUEMENT,
+# pour que la DLL reste autonome. ML-KEM seul et sans OpenSSL — le moteur ne
+# dépend que de libsodium, et embarquer OpenSSL doublerait la surface
+# cryptographique livrée.
+OQS_VERSION="0.14.0"
+echo ">> Récupération et compilation statique de liboqs ${OQS_VERSION}"
+git clone --depth 1 --branch "$OQS_VERSION" \
+  https://github.com/open-quantum-safe/liboqs.git "$WORK/liboqs" >/dev/null 2>&1
+cat > "$WORK/mingw-toolchain.cmake" <<EOF
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_C_COMPILER ${MINGW_HOST}-gcc)
+set(CMAKE_CXX_COMPILER ${MINGW_HOST}-g++)
+set(CMAKE_RC_COMPILER ${MINGW_HOST}-windres)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+EOF
+cmake -S "$WORK/liboqs" -B "$WORK/liboqs/build" \
+  -DCMAKE_TOOLCHAIN_FILE="$WORK/mingw-toolchain.cmake" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DOQS_MINIMAL_BUILD=KEM_ml_kem_768 \
+  -DOQS_USE_OPENSSL=OFF \
+  -DOQS_BUILD_ONLY_LIB=ON \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DCMAKE_INSTALL_PREFIX="$WORK/oqs" >/dev/null
+cmake --build "$WORK/liboqs/build" --target install -j"$(nproc)" >/dev/null
+OQS="$WORK/oqs"
+
 ENGINE_SRC=(
   "$ROOT/src/engine.cpp" "$ROOT/src/identity.cpp" "$ROOT/src/x3dh.cpp"
   "$ROOT/src/ratchet.cpp" "$ROOT/src/session.cpp" "$ROOT/src/primitives/primitives.cpp"
   "$ROOT/src/storage/identity_store.cpp" "$ROOT/src/storage/secure_blob.cpp" "$ROOT/src/vault.cpp" "$ROOT/src/attachment.cpp" "$ROOT/src/safety_number.cpp" "$ROOT/src/release_signature.cpp" "$ROOT/src/backup.cpp" "$ROOT/src/applock.cpp" "$ROOT/src/sealed_sender.cpp" "$ROOT/src/sender_keys.cpp"
   "$ROOT/platform/windows/secure_key_store_windows.cpp"
 )
-COMMON_FLAGS=(-std=c++20 -O2 -DSODIUM_STATIC=1 -I"$ROOT/include" -I"$ROOT/src" -I"$SODIUM/include")
+COMMON_FLAGS=(-std=c++20 -O2 -DSODIUM_STATIC=1 -I"$ROOT/include" -I"$ROOT/src"
+              -I"$SODIUM/include" -I"$OQS/include")
 STATIC_LINK=(-static -static-libgcc -static-libstdc++
-             -L"$SODIUM/lib" -l:libsodium.a -lcrypt32 -lshell32 -lole32 -luuid)
+             -L"$SODIUM/lib" -l:libsodium.a -L"$OQS/lib" -l:liboqs.a
+             -lcrypt32 -lshell32 -lole32 -luuid)
 
 mkdir -p "$DIST"
 

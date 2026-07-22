@@ -15,6 +15,10 @@ set -euo pipefail
 SODIUM_VERSION="1.0.20"
 API_LEVEL=24                      # Android 7.0, seuil courant pour Flutter
 ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
+OQS_VERSION="0.14.0"                # ML-KEM-768 (PQXDH)
+# Permet de ne construire qu'une ABI pendant une mise au point :
+#   ZIA_ABIS="arm64-v8a" ./scripts/build-android.sh
+[ -n "${ZIA_ABIS:-}" ] && read -r -a ABIS <<< "$ZIA_ABIS"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 JNI_LIBS="$(cd "$ROOT/.." && pwd)/app/android/app/src/main/jniLibs"
@@ -83,21 +87,40 @@ for abi in "${ABIS[@]}"; do
     make install >/dev/null
   )
 
+  # liboqs pour cette ABI. Comme libsodium : statique, ML-KEM seul, sans
+  # OpenSSL — un .so d'application n'a pas à embarquer deux bibliothèques
+  # cryptographiques complètes.
+  echo ">> [$abi] compilation de liboqs"
+  oqs_prefix="$WORK/oqs-$abi"
+  if [ ! -d "$WORK/liboqs" ]; then
+    git clone --depth 1 --branch "$OQS_VERSION" \
+      https://github.com/open-quantum-safe/liboqs.git "$WORK/liboqs" >/dev/null 2>&1
+  fi
+  cmake -S "$WORK/liboqs" -B "$WORK/liboqs/build-$abi" \
+    -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+    -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$API_LEVEL" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DOQS_MINIMAL_BUILD=KEM_ml_kem_768 \
+    -DOQS_USE_OPENSSL=OFF -DOQS_BUILD_ONLY_LIB=ON -DBUILD_SHARED_LIBS=OFF \
+    -DCMAKE_INSTALL_PREFIX="$oqs_prefix" >/dev/null
+  cmake --build "$WORK/liboqs/build-$abi" --target install -j"$(nproc)" >/dev/null
+
   echo ">> [$abi] compilation de libzia_crypto.so"
   out_dir="$JNI_LIBS/$abi"
   mkdir -p "$out_dir"
   "$TOOLCHAIN/bin/${host}${API_LEVEL}-clang++" \
     -std=c++20 -O2 -DNDEBUG -fPIC -shared \
     -I"$ROOT/include" -I"$ROOT/src" -I"$sodium_prefix/include" \
+    -I"$oqs_prefix/include" \
     "$ROOT/src/engine.cpp" "$ROOT/src/identity.cpp" "$ROOT/src/x3dh.cpp" \
     "$ROOT/src/ratchet.cpp" "$ROOT/src/session.cpp" \
     "$ROOT/src/primitives/primitives.cpp" \
     "$ROOT/src/storage/identity_store.cpp" "$ROOT/src/storage/secure_blob.cpp" \
     "$ROOT/src/vault.cpp" "$ROOT/src/attachment.cpp" \
-    "$ROOT/src/safety_number.cpp" "$ROOT/src/release_signature.cpp" "$ROOT/src/backup.cpp" "$ROOT/src/applock.cpp" "$ROOT/src/sealed_sender.cpp" \
+    "$ROOT/src/safety_number.cpp" "$ROOT/src/release_signature.cpp" "$ROOT/src/backup.cpp" "$ROOT/src/applock.cpp" "$ROOT/src/sealed_sender.cpp" "$ROOT/src/sender_keys.cpp" \
     "$ROOT/platform/android/secure_key_store_android.cpp" \
     -o "$out_dir/libzia_crypto.so" \
-    "$sodium_prefix/lib/libsodium.a" -llog
+    "$sodium_prefix/lib/libsodium.a" "$oqs_prefix/lib/liboqs.a" -llog
 
   "$TOOLCHAIN/bin/llvm-strip" --strip-unneeded "$out_dir/libzia_crypto.so"
   "$TOOLCHAIN/bin/llvm-nm" --dynamic --defined-only "$out_dir/libzia_crypto.so" \
