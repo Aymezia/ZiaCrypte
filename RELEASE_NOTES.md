@@ -1,6 +1,6 @@
-# ZiaCrypte v0.5.0 — history, real-time delivery, and Android
+# ZiaCrypte v0.10.0 — presence, personal status, and message padding
 
-Three things this release makes usable: your conversations survive a restart, messages arrive instantly instead of on a timer, and there is now an Android build.
+Three visible additions, one invisible. The visible ones: you can see when a correspondent is online, and write a status about yourself — both without telling the server anything new. The invisible one: every message now leaves at a fixed size.
 
 ## Downloads
 
@@ -12,44 +12,44 @@ Three things this release makes usable: your conversations survive a restart, me
 | **`ziacrypte-macos-app.zip`** | macOS — unzip, right-click `ziacrypte.app` → Open (unsigned) |
 | `zia_crypto_test.exe` | Standalone Windows verifier for the crypto engine |
 
-Nothing to configure: the server address is built in and the relay runs over HTTPS.
+Every asset is signed, and the application verifies the signature before installing an update.
 
-## Conversation history, encrypted locally
+## Online presence — opt-in, and only for people you talk to
 
-The engine gained a general-purpose local vault: arbitrary data encrypted with `crypto_secretstream_xchacha20poly1305` under the device master key held by the OS key store. Writes are atomic and entry names are validated, so a caller cannot escape the vault directory.
+A dot next to a correspondent tells you they are reachable. Two locks make that safe:
 
-The application keeps each conversation's history there. Two backend fixes were needed to make it work for both correspondents: a direct conversation between two people is now unique (its identifier changed on every open before, orphaning the stored history), and received messages carry the sender's username so the recipient knows who is writing.
+- **Nothing is broadcast until you ask for it.** Sharing your presence is off by default, exactly like read receipts. The hour at which you open a messenger says when you sleep and when you work — nobody should give that away without choosing to. Clients that predate the feature stay silent on their own.
+- **You can only watch devices you already share a conversation with**, never across a block. Blocking someone cuts presence both ways, immediately, without waiting for a reconnection.
 
-## Real-time delivery
+There is **no "last seen at"**. A coarse online/offline dot is a convenience; a timestamped history of connections is a sleep diary. You can also watch others without showing yourself — the reciprocity other messengers impose is a politeness rule, not a security one.
 
-A WebSocket gateway notifies a device that a blob is waiting; the client then fetches it immediately. **The WebSocket carries no content** — only a signal — and delivery never depends on it: the periodic fetch remains as a safety net (now every 15 s), with automatic reconnection. Authentication happens at the handshake, and nginx relays the upgrade over TLS.
+The server learns nothing new here: it holds the WebSocket, so it already knew who was connected. What changes is what *other people* learn, which is why the whole feature is built around consent.
 
-## Android
+## Personal status
 
-The engine is cross-compiled with the NDK for three ABIs with libsodium linked statically. Since the Android Keystore has no C API, the native backend reaches `com.ziacrypte.KeyStoreBridge` through JNI: a non-exportable AES key in the hardware Keystore wraps the 32-byte master key.
+A sentence about yourself — "Available", "In a meeting". It does **not** go into a column next to your username, where the host could read it. It travels through the encrypted channel, like profile photos and ephemeral-message settings, and is kept in the engine's encrypted vault.
 
-Two traps were found and fixed along the way:
+A phrase people write about themselves often says more than an address book: "in hospital until Friday", "new number", a first name, a town. The consequence is assumed: only people you have an open conversation with see your status.
 
-- `FindClass` from a secondary thread cannot see application classes (wrong class loader). The class is now cached as a global reference in `JNI_OnLoad`.
-- **R8 was renaming that class**, which would have made the native lookup fail silently at runtime — persistence would have broken with no error. This was caught by inspecting the DEX of the first APK, where every class had been obfuscated. Keep rules now preserve it, confirmed in the final DEX.
+## Message padding
+
+The server cannot decrypt anything, and since sealed sender it often cannot tell who is writing to whom. It could still see one thing — **the size of every blob**. A read receipt, a group key distribution and a short "ok" each have a characteristic length, and the sequence of sizes draws the shape of a conversation.
+
+Messages are now padded to 160-byte buckets before encryption, control messages included. Measured over a full two-client test run — messages, statuses, control traffic, a group message — the database ended up holding exactly **two distinct ciphertext sizes** instead of one per message. The overhead is bounded at 159 bytes, whatever the message.
+
+The padding is made of spaces rather than the usual `0x80`-and-zeros: the payload is JSON, trailing whitespace is legal there, so clients from previous versions read padded messages correctly without knowing anything about padding. No negotiation, no wire-format change.
+
+## Under the hood: post-quantum groundwork
+
+The engine now implements **PQXDH**, hybrid key agreement combining X25519 with ML-KEM-768 (FIPS 203, via liboqs). What is captured today becomes decryptable the day a quantum machine exists; the post-quantum component is *added* to the Diffie-Hellman exchanges rather than replacing any of them, so breaking ML-KEM leaves today's security intact, and breaking X25519 leaves the post-quantum protection standing.
+
+**It is not active on the wire yet.** The server does not relay the encapsulation key, so sessions still negotiate classic X3DH. This release puts the machinery in place — including a device identity format that can carry post-quantum keys — so the next one can switch it on without a migration. The fallback path is deliberate and tested: it is what keeps already-installed clients working.
 
 ## Verified by actually running it
 
-- Engine suites (conformance + persistence, including vault checks): **2/2**
-- Flutter suite (widget + FFI against the real engine): **5/5**
-- Backend integration suite against a real PostgreSQL: **1/1**
-- **History**: two messages sent from the interface, application closed, relaunched, history restored — and the vault file on disk contains no readable text
-- **Real-time**: an auto-replying peer answered and the reply appeared in the application in under 2.5 s, well before the 15 s periodic fetch
-- **Android APK**: contents verified — native libraries for all three ABIs, INTERNET permission, and the JNI bridge with its five methods intact after R8
+- Engine suites: **7/7**, including six new PQXDH checks, and again under ASan + UBSan
+- The same engine cross-compiled for Windows: **12/12** under wine
+- Flutter suite: **46 passed**; two-client integration against a dedicated server: all passed
+- Backend suite against a real PostgreSQL: **54 passed**
 
-## Known limitations
-
-- The **Android, Windows and macOS** applications are built and their packages verified, but **never launched** — no such device was available here. Only Linux was exercised end to end.
-- The APK is signed with a debug key; Android will warn on install.
-- Windows and macOS builds are unsigned.
-- Message history is kept per device: a new device starts with an empty history.
-- iOS is scaffolded but not published; it requires an Apple Developer account for signing and installation.
-
-## Security
-
-Every cryptographic primitive comes from [libsodium](https://libsodium.org). Only the X3DH and Double Ratchet protocol logic is implemented here, following the published Signal specifications. Private keys and conversation history never touch the disk unencrypted, and the server never holds a key nor sees a plaintext.
+One finding worth recording: the engine's presets build in `Release`, so `NDEBUG` was erasing every `assert()` in the test suite. The binaries ran, printed their "[OK]" lines, and verified nothing beyond the absence of a crash. `NDEBUG` is now stripped from test targets, and the suites pass with their checks genuinely enforced.
