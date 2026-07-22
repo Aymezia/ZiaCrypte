@@ -34,6 +34,21 @@ if(ZIA_BUILD_FUZZERS)
   target_link_options(zia_fuzz_parsers PRIVATE -fsanitize=fuzzer)
 endif()
 
+# Migration du format d'identité : compile le sérialiseur interne directement,
+# seul moyen de fabriquer un fichier v1 maintenant que l'écriture produit du v2.
+add_executable(zia_identity_migration_test
+    identity_migration_test.cpp
+    ${CMAKE_SOURCE_DIR}/src/storage/identity_store.cpp
+    ${CMAKE_SOURCE_DIR}/src/primitives/primitives.cpp)
+target_include_directories(zia_identity_migration_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(zia_identity_migration_test PRIVATE zia_crypto zia::sodium zia::oqs)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(zia_identity_migration_test
+        PRIVATE ${CMAKE_SOURCE_DIR}/platform/linux/secure_key_store_linux.cpp)
+    target_link_libraries(zia_identity_migration_test PRIVATE PkgConfig::LIBSECRET)
+endif()
+add_test(NAME identity_migration COMMAND zia_identity_migration_test)
+
 # Sauvegarde exportable : deux moteurs, deux dossiers de stockage. Le montage
 # est ce qui fait la preuve — un aller-retour dans un seul moteur réussirait
 # même si la clé de l'appareil s'était glissée dans le fichier.
@@ -51,3 +66,29 @@ add_test(NAME sealed_sender COMMAND zia_sealed_sender_test)
 add_executable(zia_sender_keys_test sender_keys_test.cpp)
 target_link_libraries(zia_sender_keys_test PRIVATE zia_crypto)
 add_test(NAME sender_keys COMMAND zia_sender_keys_test)
+
+# ------------------------------------------------------------------ NDEBUG
+#
+# Toute cette suite est écrite avec assert(). Or les presets compilent en
+# Release, donc avec NDEBUG : le préprocesseur EFFAÇAIT chaque vérification.
+# Les binaires s'exécutaient, affichaient leurs lignes « [OK] », et ne
+# testaient rien d'autre que l'absence de plantage — un test vert qui ne
+# vérifie rien est pire que pas de test, puisqu'on s'y fie.
+#
+# On retire donc NDEBUG pour les cibles de test uniquement. La bibliothèque,
+# elle, reste compilée en Release.
+set(ZIA_TEST_TARGETS
+    zia_crypto_conformance_test
+    zia_persistence_test
+    zia_safety_number_test
+    zia_identity_migration_test
+    zia_backup_test
+    zia_sealed_sender_test
+    zia_sender_keys_test)
+foreach(cible IN LISTS ZIA_TEST_TARGETS)
+    if(MSVC)
+        target_compile_options(${cible} PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(${cible} PRIVATE -UNDEBUG)
+    endif()
+endforeach()

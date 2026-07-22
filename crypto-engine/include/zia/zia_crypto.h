@@ -19,6 +19,9 @@ extern "C" {
 #define ZIA_SIGNATURE_LEN    64   /* Ed25519 */
 #define ZIA_ATTACHMENT_KEY_LEN 32 /* clé de pièce jointe (XChaCha20-Poly1305) */
 #define ZIA_SAFETY_NUMBER_DIGITS 60 /* 2 x 30 chiffres, format Signal */
+/* ML-KEM-768 (FIPS 203) — composante post-quantique du handshake, cf. PQXDH. */
+#define ZIA_PQ_PUBLIC_KEY_LEN  1184
+#define ZIA_PQ_CIPHERTEXT_LEN  1088
 
 /* ---- Handles opaques ---- */
 typedef struct ZiaEngine  ZiaEngine;
@@ -48,6 +51,18 @@ typedef struct {
     uint8_t signed_prekey_signature[ZIA_SIGNATURE_LEN];
     uint8_t one_time_prekey[ZIA_PUBLIC_KEY_LEN];
     uint8_t has_one_time_prekey; /* 0/1 — le pool serveur peut être épuisé */
+
+    /* Prekey post-quantique (PQXDH). SIGNÉE par la clé d'identité, exactement
+     * comme le signed prekey : sans cette signature, le serveur pourrait
+     * substituer sa propre clé d'encapsulation et lire la composante PQ.
+     *
+     * has_pq_prekey = 0 décrit un correspondant qui n'a pas encore migré : le
+     * handshake retombe alors sur le X3DH classique. Ce repli est le prix de
+     * la compatibilité avec les versions déjà installées — voir
+     * zia_session_require_pq pour l'interdire une fois le parc à jour. */
+    uint8_t pq_prekey[ZIA_PQ_PUBLIC_KEY_LEN];
+    uint8_t pq_prekey_signature[ZIA_SIGNATURE_LEN];
+    uint8_t has_pq_prekey; /* 0/1 */
 } ZiaPrekeyBundle;
 
 /* Matériel de handshake X3DH à transmettre par le canal applicatif (ratchet_header
@@ -59,6 +74,11 @@ typedef struct {
     uint8_t initiator_ephemeral_key[ZIA_PUBLIC_KEY_LEN];
     uint8_t used_one_time_prekey[ZIA_PUBLIC_KEY_LEN];
     uint8_t has_one_time_prekey; /* 0/1 */
+
+    /* Chiffré ML-KEM produit par l'initiateur contre la prekey PQ du
+     * destinataire. Celui-ci le décapsule pour retrouver le même secret. */
+    uint8_t pq_ciphertext[ZIA_PQ_CIPHERTEXT_LEN];
+    uint8_t has_pq; /* 0/1 — 0 = handshake classique (pair non migré) */
 } ZiaHandshakeMaterial;
 
 /* ================= Cycle de vie ================= */
@@ -76,7 +96,16 @@ ZIA_API ZiaStatus zia_verify_signature(const uint8_t pub[ZIA_PUBLIC_KEY_LEN],
                                        const uint8_t* msg, size_t msg_len,
                                        const uint8_t sig[ZIA_SIGNATURE_LEN]);
 
-/* ================= X3DH / Prekeys ================= */
+/* ================= X3DH / PQXDH / Prekeys ================= */
+/* Exiger la composante post-quantique.
+ *
+ * Par défaut DÉSACTIVÉ : un correspondant dont l'application n'a pas encore été
+ * mise à jour envoie un handshake classique, et le refuser rendrait la
+ * messagerie inutilisable pendant toute la migration. Une fois le parc à jour,
+ * activer ce drapeau ferme le repli — sans lui, un serveur hostile pourrait
+ * retirer la prekey PQ du bundle qu'il sert et forcer le handshake classique,
+ * sans que personne ne s'en aperçoive. */
+ZIA_API ZiaStatus zia_session_require_pq(ZiaEngine* engine, int required);
 ZIA_API ZiaStatus zia_prekey_bundle_generate(ZiaEngine* engine, ZiaPrekeyBundle* out_bundle);
 ZIA_API ZiaStatus zia_prekey_bundle_rotate(ZiaEngine* engine);
 

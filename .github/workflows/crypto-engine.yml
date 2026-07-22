@@ -28,6 +28,21 @@ jobs:
           sudo apt-get install -y cmake ninja-build libsodium-dev libsecret-1-dev \
                                   gnome-keyring dbus-x11
 
+      # liboqs (ML-KEM-768, PQXDH) : aucune distribution ne l'empaquette
+      # encore. Compilé ici en version épinglée, ML-KEM seul, et SANS OpenSSL —
+      # le moteur ne dépend que de libsodium, faire entrer OpenSSL doublerait
+      # la surface cryptographique pour rien.
+      - name: Construire liboqs
+        run: |
+          git clone --depth 1 --branch 0.14.0 https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cmake -S /tmp/liboqs -B /tmp/liboqs/build -GNinja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DOQS_MINIMAL_BUILD=KEM_ml_kem_768 \
+                -DOQS_USE_OPENSSL=OFF \
+                -DOQS_BUILD_ONLY_LIB=ON \
+                -DBUILD_SHARED_LIBS=OFF
+          sudo cmake --build /tmp/liboqs/build --target install
+
       - name: Configure
         working-directory: crypto-engine
         run: cmake --preset linux-system
@@ -59,6 +74,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang llvm cmake ninja-build libsodium-dev libsecret-1-dev
+
+      # liboqs (ML-KEM-768, PQXDH) : aucune distribution ne l'empaquette
+      # encore. Compilé ici en version épinglée, ML-KEM seul, et SANS OpenSSL —
+      # le moteur ne dépend que de libsodium, faire entrer OpenSSL doublerait
+      # la surface cryptographique pour rien.
+      - name: Construire liboqs
+        run: |
+          git clone --depth 1 --branch 0.14.0 https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cmake -S /tmp/liboqs -B /tmp/liboqs/build -GNinja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DOQS_MINIMAL_BUILD=KEM_ml_kem_768 \
+                -DOQS_USE_OPENSSL=OFF \
+                -DOQS_BUILD_ONLY_LIB=ON \
+                -DBUILD_SHARED_LIBS=OFF
+          sudo cmake --build /tmp/liboqs/build --target install
 
       # Aucun service de trousseau n'existe sur un runner. Le moteur doit
       # échouer franchement plutôt que d'attendre indéfiniment — un délai court

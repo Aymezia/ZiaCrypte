@@ -12,11 +12,26 @@ using namespace zia::crypto;
 
 namespace {
 
-/* SK = HKDF(DH1 || DH2 || DH3 [|| DH4]) — cf. spec X3DH. Le sel est fixé à zéro :
- * l'entropie provient entièrement des sorties DH, pas du sel (X3DH standard). */
+/* SK = HKDF(DH1 || DH2 || DH3 [|| DH4] [|| SS]) — X3DH, étendu par PQXDH.
+ *
+ * Le sel est fixé à zéro : l'entropie provient entièrement des sorties DH, pas
+ * du sel (X3DH standard).
+ *
+ * `ss` est le secret encapsulé par ML-KEM quand la composante post-quantique
+ * est présente. Il s'AJOUTE aux échanges Diffie-Hellman, il ne remplace rien :
+ *   - si ML-KEM tombe, il reste exactement la sécurité du X3DH d'aujourd'hui ;
+ *   - si X25519 tombe (machine quantique), la composante PQ tient encore.
+ * C'est tout l'intérêt d'un schéma hybride, et c'est pourquoi le mode « PQ
+ * seul » n'existe pas ici.
+ *
+ * L'étiquette HKDF diffère selon le mode. Cette séparation de domaine n'est pas
+ * cosmétique : elle garantit qu'un handshake classique et un handshake hybride
+ * ne peuvent jamais produire la même clé, même si un attaquant parvenait à
+ * faire coïncider les entrées. */
 void derive_shared_secret(const uint8_t* dh1, const uint8_t* dh2, const uint8_t* dh3,
-                           const uint8_t* dh4 /* nullable */, uint8_t out_sk[32]) {
-    uint8_t ikm[128];
+                           const uint8_t* dh4 /* nullable */,
+                           const uint8_t* ss /* nullable */, uint8_t out_sk[32]) {
+    uint8_t ikm[160];
     size_t offset = 0;
     std::memcpy(ikm + offset, dh1, 32); offset += 32;
     std::memcpy(ikm + offset, dh2, 32); offset += 32;
@@ -25,12 +40,23 @@ void derive_shared_secret(const uint8_t* dh1, const uint8_t* dh2, const uint8_t*
         std::memcpy(ikm + offset, dh4, 32);
         offset += 32;
     }
+    if (ss) {
+        std::memcpy(ikm + offset, ss, 32);
+        offset += 32;
+    }
     uint8_t salt[32] = {0};
-    primitives::hkdf_sha256(salt, sizeof(salt), ikm, offset, "ZiaCrypteX3DH", out_sk, 32);
+    primitives::hkdf_sha256(salt, sizeof(salt), ikm, offset,
+                             ss ? "ZiaCryptePQXDH" : "ZiaCrypteX3DH", out_sk, 32);
     sodium_memzero(ikm, sizeof(ikm));
 }
 
 } // namespace
+
+ZIA_API ZiaStatus zia_session_require_pq(ZiaEngine* engine, int required) {
+    if (!engine) return ZIA_ERR_INVALID_ARG;
+    engine->require_pq = required != 0;
+    return ZIA_OK;
+}
 
 ZIA_API ZiaStatus zia_prekey_bundle_rotate(ZiaEngine* engine) {
     if (!engine) return ZIA_ERR_INVALID_ARG;
@@ -40,6 +66,19 @@ ZIA_API ZiaStatus zia_prekey_bundle_rotate(ZiaEngine* engine) {
     primitives::x25519_keypair(spk.public_key, spk.private_key);
     primitives::ed25519_sign(engine->identity_private, spk.public_key, ZIA_PUBLIC_KEY_LEN, spk.signature);
     engine->signed_prekey = std::move(spk);
+
+    /* La prekey post-quantique suit le même rythme de rotation que le signed
+       prekey : deux cadences différentes n'apporteraient rien et donneraient
+       deux fenêtres de compromission à raisonner au lieu d'une. */
+    ZiaPqPrekey pq;
+    primitives::mlkem768_keypair(pq.public_key, pq.private_key);
+    if (pq.private_key.size() != primitives::kPqSecretKeyLen) {
+        return ZIA_ERR_CRYPTO_FAILURE; // aléa indisponible : on ne publie rien
+    }
+    primitives::ed25519_sign(engine->identity_private, pq.public_key,
+                              primitives::kPqPublicKeyLen, pq.signature);
+    engine->pq_prekey = std::move(pq);
+
     storage::save_identity(*engine);
     return ZIA_OK;
 }
@@ -48,7 +87,9 @@ ZIA_API ZiaStatus zia_prekey_bundle_generate(ZiaEngine* engine, ZiaPrekeyBundle*
     if (!engine || !out_bundle) return ZIA_ERR_INVALID_ARG;
     if (!engine->has_identity) return ZIA_ERR_NOT_INITIALIZED;
 
-    if (!engine->signed_prekey.has_value()) {
+    if (!engine->signed_prekey.has_value() || !engine->pq_prekey.has_value()) {
+        // Couvre aussi la migration d'une identité créée avant PQXDH : elle a
+        // un signed prekey mais pas de clé PQ, et la rotation lui en donne une.
         ZiaStatus rc = zia_prekey_bundle_rotate(engine);
         if (rc != ZIA_OK) return rc;
     }
@@ -65,6 +106,11 @@ ZIA_API ZiaStatus zia_prekey_bundle_generate(ZiaEngine* engine, ZiaPrekeyBundle*
     std::memcpy(out_bundle->signed_prekey_signature, engine->signed_prekey->signature, ZIA_SIGNATURE_LEN);
     std::memcpy(out_bundle->one_time_prekey, engine->one_time_prekeys.back().public_key, ZIA_PUBLIC_KEY_LEN);
     out_bundle->has_one_time_prekey = 1;
+
+    std::memcpy(out_bundle->pq_prekey, engine->pq_prekey->public_key,
+                primitives::kPqPublicKeyLen);
+    std::memcpy(out_bundle->pq_prekey_signature, engine->pq_prekey->signature, ZIA_SIGNATURE_LEN);
+    out_bundle->has_pq_prekey = 1;
     return ZIA_OK;
 }
 
@@ -102,8 +148,31 @@ ZIA_API ZiaStatus zia_session_from_bundle(ZiaEngine* engine, const ZiaPrekeyBund
         return ZIA_ERR_CRYPTO_FAILURE;
     }
 
+    /* Composante post-quantique. La prekey PQ est vérifiée AVANT d'être
+       utilisée : une clé d'encapsulation non signée par l'identité annoncée
+       serait exactement le moyen, pour le serveur, de lire ce que le PQ est
+       censé protéger. */
+    const bool use_pq = their_bundle->has_pq_prekey != 0;
+    uint8_t pq_ct[ZIA_PQ_CIPHERTEXT_LEN];
+    uint8_t pq_ss[32] = {0};
+    if (use_pq) {
+        if (!primitives::ed25519_verify(their_bundle->identity_key, their_bundle->pq_prekey,
+                                         primitives::kPqPublicKeyLen,
+                                         their_bundle->pq_prekey_signature)) {
+            return ZIA_ERR_SIGNATURE_INVALID;
+        }
+        if (!primitives::mlkem768_encapsulate(their_bundle->pq_prekey, pq_ct, pq_ss)) {
+            return ZIA_ERR_CRYPTO_FAILURE;
+        }
+    } else if (engine->require_pq) {
+        // Le pair annonce un bundle sans clé PQ alors qu'on exige l'hybride :
+        // c'est soit un client non migré, soit un serveur qui a retiré la clé.
+        // Les deux se traitent pareil — on n'ouvre pas la session.
+        return ZIA_ERR_SIGNATURE_INVALID;
+    }
+
     uint8_t sk[32];
-    derive_shared_secret(dh1, dh2, dh3, use_otpk ? dh4 : nullptr, sk);
+    derive_shared_secret(dh1, dh2, dh3, use_otpk ? dh4 : nullptr, use_pq ? pq_ss : nullptr, sk);
 
     auto* session = new ZiaSession();
     std::memcpy(session->ad, engine->identity_public, ZIA_PUBLIC_KEY_LEN);
@@ -116,7 +185,14 @@ ZIA_API ZiaStatus zia_session_from_bundle(ZiaEngine* engine, const ZiaPrekeyBund
         std::memcpy(out_handshake->used_one_time_prekey, their_bundle->one_time_prekey, ZIA_PUBLIC_KEY_LEN);
     }
     out_handshake->has_one_time_prekey = use_otpk ? 1 : 0;
+    if (use_pq) {
+        std::memcpy(out_handshake->pq_ciphertext, pq_ct, ZIA_PQ_CIPHERTEXT_LEN);
+    } else {
+        std::memset(out_handshake->pq_ciphertext, 0, ZIA_PQ_CIPHERTEXT_LEN);
+    }
+    out_handshake->has_pq = use_pq ? 1 : 0;
 
+    sodium_memzero(pq_ss, sizeof(pq_ss));
     sodium_memzero(dh1, sizeof(dh1));
     sodium_memzero(dh2, sizeof(dh2));
     sodium_memzero(dh3, sizeof(dh3));
@@ -162,8 +238,25 @@ ZIA_API ZiaStatus zia_session_accept_handshake(ZiaEngine* engine, const ZiaHands
         }
     }
 
+    /* Décapsulation post-quantique. ML-KEM ne signale pas un chiffré invalide :
+       il rend un secret pseudo-aléatoire, et c'est le déchiffrement du premier
+       message qui échouera. Ce silence est celui du schéma, pas du nôtre. */
+    const bool use_pq = handshake->has_pq != 0;
+    uint8_t pq_ss[32] = {0};
+    if (use_pq) {
+        if (!engine->pq_prekey.has_value()) return ZIA_ERR_NOT_INITIALIZED;
+        if (!primitives::mlkem768_decapsulate(engine->pq_prekey->private_key,
+                                               handshake->pq_ciphertext, pq_ss)) {
+            return ZIA_ERR_CRYPTO_FAILURE;
+        }
+    } else if (engine->require_pq) {
+        // Repli classique refusé : voir zia_session_require_pq.
+        return ZIA_ERR_SIGNATURE_INVALID;
+    }
+
     uint8_t sk[32];
-    derive_shared_secret(dh1, dh2, dh3, use_otpk ? dh4 : nullptr, sk);
+    derive_shared_secret(dh1, dh2, dh3, use_otpk ? dh4 : nullptr, use_pq ? pq_ss : nullptr, sk);
+    sodium_memzero(pq_ss, sizeof(pq_ss));
 
     auto* session = new ZiaSession();
     std::memcpy(session->ad, handshake->initiator_identity_key, ZIA_PUBLIC_KEY_LEN);

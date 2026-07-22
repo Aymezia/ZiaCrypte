@@ -12,6 +12,12 @@ const int ziaPublicKeyLen = 32;
 const int ziaSignatureLen = 64;
 const int ziaAttachmentKeyLen = 32;
 
+/// ML-KEM-768 (FIPS 203). Ces deux tailles DOIVENT suivre zia_crypto.h : une
+/// structure Dart plus courte que son homologue C ferait écrire le moteur
+/// au-delà du tampon alloué ici — corruption de tas, sans exception.
+const int ziaPqPublicKeyLen = 1184;
+const int ziaPqCiphertextLen = 1088;
+
 // ---- Codes de statut (miroir de l'enum ZiaStatus) ----
 abstract final class ZiaStatus {
   static const int ok = 0;
@@ -50,6 +56,16 @@ final class ZiaPrekeyBundle extends Struct {
 
   @Uint8()
   external int has_one_time_prekey;
+
+  /// Prekey post-quantique (ML-KEM-768), signée par la clé d'identité.
+  @Array<Uint8>(ziaPqPublicKeyLen)
+  external Array<Uint8> pq_prekey;
+
+  @Array<Uint8>(ziaSignatureLen)
+  external Array<Uint8> pq_prekey_signature;
+
+  @Uint8()
+  external int has_pq_prekey;
 }
 
 final class ZiaHandshakeMaterial extends Struct {
@@ -64,6 +80,13 @@ final class ZiaHandshakeMaterial extends Struct {
 
   @Uint8()
   external int has_one_time_prekey;
+
+  /// Chiffré ML-KEM produit contre la prekey PQ du destinataire.
+  @Array<Uint8>(ziaPqCiphertextLen)
+  external Array<Uint8> pq_ciphertext;
+
+  @Uint8()
+  external int has_pq;
 }
 
 /// Table des symboles natifs, résolue une fois à partir d'une [DynamicLibrary].

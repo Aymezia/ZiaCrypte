@@ -13,6 +13,17 @@ struct ZiaSignedPrekey {
     uint8_t signature[64];
 };
 
+/* Prekey post-quantique (ML-KEM-768), signée par la clé d'identité.
+   Une seule à la fois, renouvelée avec le signed prekey : c'est la « last
+   resort key » de PQXDH. Des clés PQ à usage unique amélioreraient encore la
+   confidentialité persistante de la composante PQ, au prix de 1184 octets par
+   clé dans le pool du serveur — à trancher séparément. */
+struct ZiaPqPrekey {
+    uint8_t public_key[1184];
+    zia::crypto::SecureBuffer private_key; /* 2400 octets */
+    uint8_t signature[64];
+};
+
 /* One-time prekey : consommée une seule fois par un handshake entrant. */
 struct ZiaOneTimePrekey {
     uint8_t public_key[32];
@@ -51,7 +62,12 @@ struct ZiaEngine {
     zia::crypto::SecureBuffer identity_private;
 
     std::optional<ZiaSignedPrekey> signed_prekey;
+    std::optional<ZiaPqPrekey> pq_prekey;
     std::vector<ZiaOneTimePrekey> one_time_prekeys;
+
+    /* Refuser un handshake sans composante post-quantique. Voir
+       zia_session_require_pq : hors du parc migré, ce serait une panne. */
+    bool require_pq = false;
 
     /* Clés d'expéditeur des groupes : la nôtre et celles des membres. */
     std::vector<ZiaSenderKey> sender_keys;

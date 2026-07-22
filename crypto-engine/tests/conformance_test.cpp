@@ -197,6 +197,147 @@ int main() {
         printf("[OK] Ciphertext falsifie rejete (ZIA_ERR_CRYPTO_FAILURE)\n");
     }
 
+    // ================= PQXDH (Phase 39) =================
+    //
+    // La composante post-quantique s'AJOUTE au X3DH. Ces cas verifient les
+    // quatre choses qui peuvent casser en silence : que la cle PQ est bien
+    // publiee et utilisee, qu'une cle PQ non signee est refusee, qu'un
+    // chiffre ML-KEM falsifie ne produit pas une session utilisable, et qu'un
+    // pair non migre continue de fonctionner.
+
+    {
+        // Le bundle porte une cle PQ, et le handshake l'emprunte reellement.
+        Engine carol_engine("/tmp/zia_test_carol");
+        uint8_t carol_pub[ZIA_PUBLIC_KEY_LEN];
+        assert(zia_identity_generate(carol_engine.handle, carol_pub) == ZIA_OK);
+
+        ZiaPrekeyBundle carol_bundle;
+        assert(zia_prekey_bundle_generate(carol_engine.handle, &carol_bundle) == ZIA_OK);
+        assert(carol_bundle.has_pq_prekey == 1);
+
+        Session a_to_c;
+        ZiaHandshakeMaterial hs_pq;
+        assert(zia_session_from_bundle(alice_engine.handle, &carol_bundle,
+                                        &a_to_c.handle, &hs_pq) == ZIA_OK);
+        assert(hs_pq.has_pq == 1);
+        printf("[OK] Bundle et handshake portent la composante ML-KEM-768\n");
+
+        // Le message passe : les deux cotes ont derive le meme secret hybride.
+        std::vector<uint8_t> h_pq;
+        std::string ct_pq = send(a_to_c.handle, "message hybride", h_pq);
+        Session c_from_a;
+        assert(zia_session_accept_handshake(carol_engine.handle, &hs_pq, &c_from_a.handle) == ZIA_OK);
+        std::string got;
+        ZiaStatus rc_pq;
+        assert(try_receive(c_from_a.handle, h_pq, ct_pq, got, rc_pq) && got == "message hybride");
+        printf("[OK] Secret hybride identique des deux cotes (DH + ML-KEM)\n");
+    }
+
+    {
+        // Signature de la cle PQ falsifiee : c'est exactement ce qu'un serveur
+        // ferait pour glisser SA cle d'encapsulation et lire la composante PQ.
+        Engine dave_engine("/tmp/zia_test_dave");
+        uint8_t dave_pub[ZIA_PUBLIC_KEY_LEN];
+        assert(zia_identity_generate(dave_engine.handle, dave_pub) == ZIA_OK);
+        ZiaPrekeyBundle bundle_pq;
+        assert(zia_prekey_bundle_generate(dave_engine.handle, &bundle_pq) == ZIA_OK);
+
+        ZiaPrekeyBundle tampered = bundle_pq;
+        tampered.pq_prekey[0] ^= 0xFF; // cle substituee, signature inchangee
+        Session doomed;
+        ZiaHandshakeMaterial hs;
+        assert(zia_session_from_bundle(alice_engine.handle, &tampered, &doomed.handle, &hs)
+               == ZIA_ERR_SIGNATURE_INVALID);
+        printf("[OK] Cle d'encapsulation substituee rejetee (signature)\n");
+    }
+
+    {
+        // Chiffre ML-KEM falsifie. ML-KEM ne le SIGNALE pas — il rend un secret
+        // pseudo-aleatoire — donc la session s'ouvre. L'echec doit se voir au
+        // premier message, jamais passer inapercu.
+        Engine erin_engine("/tmp/zia_test_erin");
+        uint8_t erin_pub[ZIA_PUBLIC_KEY_LEN];
+        assert(zia_identity_generate(erin_engine.handle, erin_pub) == ZIA_OK);
+        ZiaPrekeyBundle erin_bundle;
+        assert(zia_prekey_bundle_generate(erin_engine.handle, &erin_bundle) == ZIA_OK);
+
+        Session a_to_e;
+        ZiaHandshakeMaterial hs;
+        assert(zia_session_from_bundle(alice_engine.handle, &erin_bundle, &a_to_e.handle, &hs) == ZIA_OK);
+        std::vector<uint8_t> h;
+        std::string ct = send(a_to_e.handle, "secret", h);
+
+        ZiaHandshakeMaterial forged = hs;
+        forged.pq_ciphertext[0] ^= 0xFF;
+        Session e_from_a;
+        assert(zia_session_accept_handshake(erin_engine.handle, &forged, &e_from_a.handle) == ZIA_OK);
+        std::string dummy;
+        ZiaStatus rc_bad;
+        assert(!try_receive(e_from_a.handle, h, ct, dummy, rc_bad));
+        printf("[OK] Chiffre ML-KEM falsifie : message indechiffrable\n");
+    }
+
+    {
+        // Tentative de RETROGRADATION : un attaquant efface le drapeau PQ du
+        // handshake pour ramener les deux cotes au X3DH classique. L'etiquette
+        // HKDF differe selon le mode, donc les secrets divergent et le message
+        // ne passe pas — la retrogradation echoue au lieu de reussir en silence.
+        Engine frank_engine("/tmp/zia_test_frank");
+        uint8_t frank_pub[ZIA_PUBLIC_KEY_LEN];
+        assert(zia_identity_generate(frank_engine.handle, frank_pub) == ZIA_OK);
+        ZiaPrekeyBundle frank_bundle;
+        assert(zia_prekey_bundle_generate(frank_engine.handle, &frank_bundle) == ZIA_OK);
+
+        Session a_to_f;
+        ZiaHandshakeMaterial hs;
+        assert(zia_session_from_bundle(alice_engine.handle, &frank_bundle, &a_to_f.handle, &hs) == ZIA_OK);
+        std::vector<uint8_t> h;
+        std::string ct = send(a_to_f.handle, "secret", h);
+
+        ZiaHandshakeMaterial degrade = hs;
+        degrade.has_pq = 0;
+        Session f_from_a;
+        assert(zia_session_accept_handshake(frank_engine.handle, &degrade, &f_from_a.handle) == ZIA_OK);
+        std::string dummy;
+        ZiaStatus rc_dg;
+        assert(!try_receive(f_from_a.handle, h, ct, dummy, rc_dg));
+        printf("[OK] Retrogradation vers le X3DH classique detectee\n");
+    }
+
+    {
+        // Pair NON MIGRE : bundle sans cle PQ. Le handshake doit continuer de
+        // fonctionner, sinon la mise a jour couperait les conversations avec
+        // tous ceux qui n'ont pas encore installe la nouvelle version.
+        Engine gina_engine("/tmp/zia_test_gina");
+        uint8_t gina_pub[ZIA_PUBLIC_KEY_LEN];
+        assert(zia_identity_generate(gina_engine.handle, gina_pub) == ZIA_OK);
+        ZiaPrekeyBundle ancien;
+        assert(zia_prekey_bundle_generate(gina_engine.handle, &ancien) == ZIA_OK);
+        ancien.has_pq_prekey = 0; // ce que publierait une version anterieure
+
+        Session a_to_g;
+        ZiaHandshakeMaterial hs;
+        assert(zia_session_from_bundle(alice_engine.handle, &ancien, &a_to_g.handle, &hs) == ZIA_OK);
+        assert(hs.has_pq == 0);
+        std::vector<uint8_t> h;
+        std::string ct = send(a_to_g.handle, "compatibilite", h);
+        Session g_from_a;
+        assert(zia_session_accept_handshake(gina_engine.handle, &hs, &g_from_a.handle) == ZIA_OK);
+        std::string got;
+        ZiaStatus rc_old;
+        assert(try_receive(g_from_a.handle, h, ct, got, rc_old) && got == "compatibilite");
+        printf("[OK] Repli classique : un pair non migre reste joignable\n");
+
+        // Et avec l'exigence PQ activee, ce meme repli est refuse.
+        assert(zia_session_require_pq(alice_engine.handle, 1) == ZIA_OK);
+        Session refuse;
+        ZiaHandshakeMaterial hs2;
+        assert(zia_session_from_bundle(alice_engine.handle, &ancien, &refuse.handle, &hs2)
+               == ZIA_ERR_SIGNATURE_INVALID);
+        assert(zia_session_require_pq(alice_engine.handle, 0) == ZIA_OK);
+        printf("[OK] zia_session_require_pq ferme le repli une fois le parc migre\n");
+    }
+
     printf("\nTous les tests de conformite ont reussi.\n");
     return 0;
 }

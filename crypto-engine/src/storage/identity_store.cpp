@@ -14,9 +14,18 @@
 namespace zia::crypto::storage {
 namespace {
 
-constexpr uint8_t kFormatVersion = 1;
+/* Version 1 : identité + signed prekey + one-time prekeys.
+   Version 2 : ajoute la prekey post-quantique (PQXDH).
+
+   La lecture accepte les DEUX : un appareil déjà installé possède un fichier
+   v1, et le refuser lui ferait perdre son identité — donc toutes ses sessions
+   et tout son historique. Il est relu, puis réécrit en v2 à la première
+   rotation. L'écriture, elle, produit toujours la version courante. */
+constexpr uint8_t kFormatVersion = 2;
 constexpr size_t kIdentityPrivLen = 64; // crypto_sign_SECRETKEYBYTES
 constexpr size_t kX25519PrivLen = 32;
+constexpr size_t kPqPubLen = 1184;
+constexpr size_t kPqPrivLen = 2400;
 
 std::filesystem::path identity_path(const std::string& storage_path) {
   return std::filesystem::path(storage_path) / "identity.zia";
@@ -87,6 +96,14 @@ std::vector<uint8_t> serialize_identity(const ZiaEngine& engine) {
     append(buf, engine.signed_prekey->signature, 64);
   }
 
+  const bool has_pq = engine.pq_prekey.has_value();
+  buf.push_back(has_pq ? 1 : 0);
+  if (has_pq) {
+    append(buf, engine.pq_prekey->public_key, kPqPubLen);
+    append(buf, engine.pq_prekey->private_key.data(), kPqPrivLen);
+    append(buf, engine.pq_prekey->signature, 64);
+  }
+
   append_u32(buf, static_cast<uint32_t>(engine.one_time_prekeys.size()));
   for (const auto& otpk : engine.one_time_prekeys) {
     append(buf, otpk.public_key, 32);
@@ -100,7 +117,7 @@ bool deserialize_identity(const uint8_t* data, size_t len, ZiaEngine& engine) {
   Reader r(data, len);
 
   uint8_t version = 0;
-  if (!r.read(&version, 1) || version != kFormatVersion) return false;
+  if (!r.read(&version, 1) || version < 1 || version > kFormatVersion) return false;
 
   uint8_t flag = 0;
   if (!r.read(&flag, 1)) return false;
@@ -119,6 +136,18 @@ bool deserialize_identity(const uint8_t* data, size_t len, ZiaEngine& engine) {
     engine.signed_prekey = std::move(spk);
   } else {
     engine.signed_prekey.reset();
+  }
+
+  engine.pq_prekey.reset();
+  if (version >= 2) {
+    if (!r.read(&flag, 1)) return false;
+    if (flag) {
+      ZiaPqPrekey pq;
+      if (!r.read(pq.public_key, kPqPubLen)) return false;
+      if (!r.read_secret(pq.private_key, kPqPrivLen)) return false;
+      if (!r.read(pq.signature, 64)) return false;
+      engine.pq_prekey = std::move(pq);
+    }
   }
 
   uint32_t count = 0;

@@ -24,6 +24,35 @@ else()
     message(STATUS "libsodium: via pkg-config système (repli hors vcpkg)")
 endif()
 
+# --- liboqs (ML-KEM-768, Phase 39) ---
+# Même schéma que libsodium : le port vcpkg pour les builds cross-plateformes,
+# l'installation système en repli sur un poste de dev Linux. Exposé sous
+# `zia::oqs` pour que le reste du projet ignore d'où il vient.
+#
+# liboqs se compile ici SANS OpenSSL (-DOQS_USE_OPENSSL=OFF) : ML-KEM n'en a
+# pas besoin, et faire entrer OpenSSL dans un moteur qui ne dépend que de
+# libsodium doublerait la surface cryptographique pour rien.
+find_package(liboqs CONFIG QUIET)
+if(TARGET OQS::oqs)
+    add_library(zia::oqs ALIAS OQS::oqs)
+    message(STATUS "liboqs: cible OQS::oqs")
+else()
+    find_path(OQS_INCLUDE_DIR oqs/oqs.h)
+    find_library(OQS_LIBRARY NAMES oqs)
+    if(NOT OQS_INCLUDE_DIR OR NOT OQS_LIBRARY)
+        message(FATAL_ERROR
+            "liboqs introuvable. Compile-le avec :\n"
+            "  cmake -S . -B build -DOQS_MINIMAL_BUILD=KEM_ml_kem_768 "
+            "-DOQS_USE_OPENSSL=OFF -DOQS_BUILD_ONLY_LIB=ON && ninja -C build install")
+    endif()
+    add_library(zia_oqs_imported STATIC IMPORTED)
+    set_target_properties(zia_oqs_imported PROPERTIES
+        IMPORTED_LOCATION ${OQS_LIBRARY}
+        INTERFACE_INCLUDE_DIRECTORIES ${OQS_INCLUDE_DIR})
+    add_library(zia::oqs ALIAS zia_oqs_imported)
+    message(STATUS "liboqs: ${OQS_LIBRARY} (repli hors vcpkg)")
+endif()
+
 # Coffre-fort de clé maîtresse (Phase 7) : sur Linux desktop, Secret Service via
 # libsecret est une dépendance système (GLib/D-Bus), pas un paquet vcpkg — comme
 # pour Keychain/Keystore/DPAPI sur les autres plateformes, on s'appuie sur le

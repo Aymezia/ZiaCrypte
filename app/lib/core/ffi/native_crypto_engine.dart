@@ -137,6 +137,12 @@ class NativeCryptoEngine {
         oneTimePrekey: b.has_one_time_prekey != 0
             ? _arrayToList(b.one_time_prekey, ziaPublicKeyLen)
             : null,
+        pqPrekey: b.has_pq_prekey != 0
+            ? _arrayToList(b.pq_prekey, ziaPqPublicKeyLen)
+            : null,
+        pqPrekeySignature: b.has_pq_prekey != 0
+            ? _arrayToList(b.pq_prekey_signature, ziaSignatureLen)
+            : null,
       );
     } finally {
       calloc.free(bundle);
@@ -163,6 +169,16 @@ class NativeCryptoEngine {
       } else {
         b.has_one_time_prekey = 0;
       }
+      // Les deux champs PQ vont ensemble : une clé sans sa signature ne peut
+      // pas être vérifiée, et le moteur la refuserait de toute façon.
+      if (theirBundle.pqPrekey != null && theirBundle.pqPrekeySignature != null) {
+        _listToArray(theirBundle.pqPrekey!, b.pq_prekey, ziaPqPublicKeyLen);
+        _listToArray(theirBundle.pqPrekeySignature!, b.pq_prekey_signature,
+            ziaSignatureLen);
+        b.has_pq_prekey = 1;
+      } else {
+        b.has_pq_prekey = 0;
+      }
 
       _check(_b.sessionFromBundle(_engine, bundle, sessionOut, hs));
 
@@ -174,6 +190,9 @@ class NativeCryptoEngine {
             _arrayToList(h.initiator_ephemeral_key, ziaPublicKeyLen),
         usedOneTimePrekey: h.has_one_time_prekey != 0
             ? _arrayToList(h.used_one_time_prekey, ziaPublicKeyLen)
+            : null,
+        pqCiphertext: h.has_pq != 0
+            ? _arrayToList(h.pq_ciphertext, ziaPqCiphertextLen)
             : null,
       );
       return (session: _wrapSession(sessionOut.value), handshake: handshake);
@@ -199,6 +218,12 @@ class NativeCryptoEngine {
         h.has_one_time_prekey = 1;
       } else {
         h.has_one_time_prekey = 0;
+      }
+      if (handshake.pqCiphertext != null) {
+        _listToArray(handshake.pqCiphertext!, h.pq_ciphertext, ziaPqCiphertextLen);
+        h.has_pq = 1;
+      } else {
+        h.has_pq = 0;
       }
 
       _check(_b.sessionAcceptHandshake(_engine, hs, sessionOut));

@@ -22,7 +22,7 @@ target_include_directories(zia_crypto
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(zia_crypto PRIVATE zia::sodium)
+target_link_libraries(zia_crypto PRIVATE zia::sodium zia::oqs)
 
 # SecureKeyStore : une implémentation par plateforme (Phases 7-8), sélectionnée
 # à la compilation. Chaque backend s'appuie sur le SDK natif de son OS.

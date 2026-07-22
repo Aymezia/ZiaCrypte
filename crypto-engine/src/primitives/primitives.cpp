@@ -1,6 +1,7 @@
 #include "primitives.hpp"
 
 #include <sodium.h>
+#include <oqs/oqs.h>
 #include <cstring>
 #include <algorithm>
 
@@ -111,6 +112,42 @@ bool aead_decrypt(const SecureBuffer& key, const uint8_t nonce[kAeadNonceLen],
     int rc = crypto_aead_chacha20poly1305_ietf_decrypt(
         out_plaintext, &mlen, nullptr, ciphertext, ciphertext_len, ad, ad_len, nonce, key.data());
     return rc == 0;
+}
+
+/* ---- ML-KEM-768, via liboqs ----
+   Les tailles sont vérifiées à la compilation contre celles annoncées par
+   liboqs : si une version future les changeait, le code refuserait de compiler
+   plutôt que de tronquer une clé en silence. */
+static_assert(kPqPublicKeyLen == OQS_KEM_ml_kem_768_length_public_key);
+static_assert(kPqSecretKeyLen == OQS_KEM_ml_kem_768_length_secret_key);
+static_assert(kPqCiphertextLen == OQS_KEM_ml_kem_768_length_ciphertext);
+static_assert(kSharedSecretLen == OQS_KEM_ml_kem_768_length_shared_secret);
+
+void mlkem768_keypair(uint8_t out_pub[kPqPublicKeyLen], SecureBuffer& out_priv) {
+    out_priv = SecureBuffer(kPqSecretKeyLen);
+    if (OQS_KEM_ml_kem_768_keypair(out_pub, out_priv.data()) != OQS_SUCCESS) {
+        // Un échec ici signifie que la source d'aléa est indisponible : il ne
+        // faut SURTOUT pas laisser une clé à moitié écrite passer pour valide.
+        sodium_memzero(out_pub, kPqPublicKeyLen);
+        out_priv = SecureBuffer();
+    }
+}
+
+bool mlkem768_encapsulate(const uint8_t pub[kPqPublicKeyLen],
+                           uint8_t out_ciphertext[kPqCiphertextLen],
+                           uint8_t out_shared[kSharedSecretLen]) {
+    return OQS_KEM_ml_kem_768_encaps(out_ciphertext, out_shared, pub) == OQS_SUCCESS;
+}
+
+bool mlkem768_decapsulate(const SecureBuffer& priv,
+                           const uint8_t ciphertext[kPqCiphertextLen],
+                           uint8_t out_shared[kSharedSecretLen]) {
+    if (priv.size() != kPqSecretKeyLen) return false;
+    // ML-KEM ne signale PAS un chiffré invalide : par construction (FO
+    // implicite), il renvoie un secret pseudo-aléatoire différent. C'est voulu
+    // — l'échec se manifeste plus loin, quand les deux côtés ne dérivent pas la
+    // même clé et que le déchiffrement du premier message rate.
+    return OQS_KEM_ml_kem_768_decaps(out_shared, ciphertext, priv.data()) == OQS_SUCCESS;
 }
 
 } // namespace zia::crypto::primitives
