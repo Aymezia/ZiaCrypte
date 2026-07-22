@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install MinGW
-        run: sudo apt-get update && sudo apt-get install -y mingw-w64 curl make
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64 curl make cmake ninja-build
       - name: Cross-build
         run: ./crypto-engine/scripts/build-windows-mingw.sh
       - name: Vérifier l'autonomie de la DLL
@@ -113,8 +113,19 @@ jobs:
       - name: Build crypto engine
         working-directory: crypto-engine
         run: |
-          brew install libsodium
-          cmake --preset linux-system   # le repli pkg-config marche aussi sur macOS
+          brew install libsodium ninja
+          # liboqs (ML-KEM-768) : aucune distribution ne l'empaquette, pas plus
+          # Homebrew. Compilé ici comme sur les autres cibles — ML-KEM seul et
+          # sans OpenSSL, le moteur ne dépendant que de libsodium.
+          git clone --depth 1 --branch 0.14.0 \
+            https://github.com/open-quantum-safe/liboqs.git /tmp/liboqs
+          cmake -S /tmp/liboqs -B /tmp/liboqs/build -GNinja \
+                -DCMAKE_BUILD_TYPE=Release -DOQS_MINIMAL_BUILD=KEM_ml_kem_768 \
+                -DOQS_USE_OPENSSL=OFF -DOQS_BUILD_ONLY_LIB=ON -DBUILD_SHARED_LIBS=OFF
+          sudo cmake --build /tmp/liboqs/build --target install
+          # /usr/local n'est pas dans le chemin de recherche par défaut sur les
+          # runners Apple Silicon, où Homebrew vit dans /opt/homebrew.
+          cmake --preset linux-system -DCMAKE_PREFIX_PATH=/usr/local
           cmake --build --preset linux-system
 
       - uses: subosito/flutter-action@v2
