@@ -1092,6 +1092,23 @@ class _ChatScreenState extends State<ChatScreen> {
                   Navigator.of(ctx).pop();
                 },
               ),
+            // Signaler ne vaut que pour un message REÇU, et en conversation
+            // directe où l'auteur est sans ambiguïté le correspondant. Sur ses
+            // propres messages, ça n'a pas de sens.
+            if (!m.mine &&
+                !m.systeme &&
+                !m.deletedForEveryone &&
+                widget.service.active?.isGroup == false &&
+                widget.service.active?.peerUserId != null)
+              ListTile(
+                leading: Icon(Icons.flag_outlined,
+                    color: Theme.of(ctx).colorScheme.error),
+                title: const Text('Signaler'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _signalerMessage(m);
+                },
+              ),
             // Modifier et supprimer pour tous n'ont de sens que sur ses PROPRES
             // messages : on ne réécrit pas les propos d'autrui.
             if (m.mine && m.id != null && !m.deletedForEveryone) ...[
@@ -1118,6 +1135,98 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ),
     );
+  }
+
+  /// Feuille de signalement : motif, note facultative, et rappel honnête de ce
+  /// qui est transmis. Rien ne part sans confirmation explicite.
+  Future<void> _signalerMessage(ChatMessage m) async {
+    final conv = widget.service.active;
+    if (conv == null) return;
+    String motif = ChatService.motifsSignalement.keys.first;
+    final note = TextEditingController();
+
+    final envoyer = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
+        child: StatefulBuilder(
+          builder: (ctx, setSheet) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Signaler ce message',
+                  style: Theme.of(ctx).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                'Tu transmets à la modération une copie de CE message, que ton '
+                'appareil a déchiffrée. Le serveur ne l’a jamais lu ; c’est toi '
+                'qui choisis de le révéler.',
+                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              for (final e in ChatService.motifsSignalement.entries)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Icon(
+                    motif == e.key
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: motif == e.key
+                        ? Theme.of(ctx).colorScheme.primary
+                        : Theme.of(ctx).colorScheme.onSurfaceVariant,
+                  ),
+                  title: Text(e.value),
+                  onTap: () => setSheet(() => motif = e.key),
+                ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: note,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Précisions (facultatif)',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('Annuler')),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                        backgroundColor: Theme.of(ctx).colorScheme.error),
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    child: const Text('Signaler'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (envoyer != true) return;
+    try {
+      await widget.service.signaler(conv, m, motif: motif, note: note.text);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Signalement transmis. Merci.')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Échec du signalement : $e')));
+    }
   }
 
   Future<void> _modifierMessage(ChatMessage m) async {

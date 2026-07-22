@@ -44,6 +44,11 @@ class ChatService extends ChangeNotifier {
   String? userId;
   String? deviceId;
 
+  /// Le compte courant est-il administrateur ? Renseigné par le serveur à la
+  /// connexion. N'ouvre AUCUN accès aux messages — il ne fait qu'afficher
+  /// l'entrée d'administration, dont chaque action réclame ensuite un code 2FA.
+  bool isAdmin = false;
+
   /// Conversations connues, indexées par identifiant de conversation.
   final Map<String, Conversation> _conversations = {};
   String? activeConversationId;
@@ -410,6 +415,7 @@ class ChatService extends ChangeNotifier {
     username = user;
     userId = res['userId'] as String;
     deviceId = res['deviceId'] as String;
+    isAdmin = res['role'] == 'admin';
 
     final pinning = IdentityPinning(gateway.engine);
     await pinning.load();
@@ -446,6 +452,7 @@ class ChatService extends ChangeNotifier {
     _api = null;
     userId = null;
     deviceId = null;
+    isAdmin = false;
     _conversations.clear();
     _pendingHandshakes.clear();
     // Le jeton de remise appartient à la session qui se ferme. Le conserver
@@ -837,6 +844,81 @@ class ChatService extends ChangeNotifier {
     bloques.remove(userId);
     notifyListeners();
   }
+
+  /// Motifs de signalement proposés à l'utilisateur (valeur serveur → libellé).
+  static const Map<String, String> motifsSignalement = {
+    'spam': 'Spam',
+    'harcelement': 'Harcèlement',
+    'contenu_illegal': 'Contenu illégal',
+    'arnaque': 'Arnaque',
+    'autre': 'Autre',
+  };
+
+  /// Signale un message reçu. On ne transmet que ce que TON appareil a déjà
+  /// déchiffré : c'est toi qui choisis de révéler ce message précis, le serveur
+  /// n'a jamais pu le lire. Réservé aux conversations directes, où l'auteur est
+  /// sans ambiguïté le correspondant.
+  Future<void> signaler(
+    Conversation conv,
+    ChatMessage m, {
+    required String motif,
+    String? note,
+  }) async {
+    final api = _api;
+    final vise = conv.peerUsername;
+    if (api == null || conv.isGroup || conv.peerUserId == null) {
+      throw StateError('Signalement indisponible pour cette conversation.');
+    }
+    final contenu = m.hasAttachment
+        ? '[pièce jointe] ${m.attachment?.fileName ?? ''}'
+        : m.text;
+    final contexte = jsonEncode({
+      'conversationId': conv.id,
+      'messageAt': m.at.toIso8601String(),
+      'pieceJointe': m.hasAttachment,
+    });
+    await api.signaler(
+      reportedUsername: vise,
+      reason: motif,
+      note: (note != null && note.trim().isNotEmpty) ? note.trim() : null,
+      content: contenu.isEmpty ? null : contenu,
+      context: contexte,
+    );
+  }
+
+  // ------------------------------------------------------------ administration
+  //
+  // Simples relais vers le client : la logique d'autorisation est côté serveur
+  // (rôle admin + code 2FA frais à chaque action). Le service n'expose ces
+  // méthodes que pour éviter que l'écran d'administration touche au client brut.
+
+  ApiClient _exigerApi() {
+    final api = _api;
+    if (api == null) throw StateError('Session fermée.');
+    return api;
+  }
+
+  Future<List<Map<String, dynamic>>> adminRechercherComptes(String totp,
+          {String? q}) =>
+      _exigerApi().adminUsers(totp, q: q);
+
+  Future<Map<String, dynamic>> adminReinitMotDePasse(String userId, String totp,
+          {String? motif}) =>
+      _exigerApi().adminIssuePasswordReset(userId, totp, reason: motif);
+
+  Future<void> adminSupprimerCompte(String userId, String totp, String motif) =>
+      _exigerApi().adminDeleteUser(userId, totp, motif);
+
+  Future<List<Map<String, dynamic>>> adminJournal(String totp) =>
+      _exigerApi().adminActions(totp);
+
+  Future<List<Map<String, dynamic>>> adminSignalements(String totp,
+          {String statut = 'open'}) =>
+      _exigerApi().adminReports(totp, status: statut);
+
+  Future<void> adminResoudreSignalement(String id, String totp,
+          {required String statut, String? resolution}) =>
+      _exigerApi().adminResolveReport(id, totp, status: statut, resolution: resolution);
 
   /// Appareils liés au compte, pour l'écran de gestion.
   Future<List<Map<String, dynamic>>> listerAppareils() async {

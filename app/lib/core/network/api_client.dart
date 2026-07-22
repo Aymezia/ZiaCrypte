@@ -307,4 +307,73 @@ class ApiClient {
     final res = await _dio.get<List<dynamic>>('/v1/messages');
     return (res.data ?? []).cast<Map<String, dynamic>>();
   }
+  /// Signale un contenu abusif. Le clair transmis est celui que le destinataire
+  /// a DÉJÀ déchiffré et choisit de révéler : le serveur ne casse rien, c'est
+  /// l'utilisateur qui lève le voile sur son propre message.
+  Future<void> signaler({
+    required String reportedUsername,
+    required String reason,
+    String? note,
+    String? content,
+    String? context,
+  }) async {
+    await _dio.post<void>('/v1/reports', data: {
+      'reportedUsername': reportedUsername,
+      'reason': reason,
+      if (note != null) 'note': note,
+      if (content != null) 'content': content,
+      if (context != null) 'context': context,
+    });
+  }
+
+  // ----------------------------------------------------------- administration
+  //
+  // Chaque appel joint un code TOTP frais dans l'en-tête `X-Admin-Totp` : le
+  // serveur l'exige à CHAQUE action, pas seulement à la connexion. Un jeton
+  // d'accès volé ne suffit donc pas — il faudrait aussi le générateur de codes.
+
+  Options _admin(String totp) => Options(headers: {'X-Admin-Totp': totp});
+
+  Future<List<Map<String, dynamic>>> adminUsers(String totp, {String? q}) async {
+    final res = await _dio.get<List<dynamic>>('/v1/admin/users',
+        queryParameters: {if (q != null && q.isNotEmpty) 'q': q},
+        options: _admin(totp));
+    return (res.data ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// Émet un jeton de réinitialisation à la demande du titulaire. L'admin ne
+  /// fixe aucun mot de passe et n'en apprend aucun : il transmet le jeton.
+  Future<Map<String, dynamic>> adminIssuePasswordReset(String userId, String totp,
+      {String? reason}) async {
+    final res = await _dio.post<Map<String, dynamic>>(
+        '/v1/admin/users/$userId/password-reset',
+        data: {if (reason != null) 'reason': reason},
+        options: _admin(totp));
+    return res.data!;
+  }
+
+  Future<void> adminDeleteUser(String userId, String totp, String reason) async {
+    await _dio.delete<void>('/v1/admin/users/$userId',
+        data: {'reason': reason}, options: _admin(totp));
+  }
+
+  Future<List<Map<String, dynamic>>> adminActions(String totp, {int limit = 50}) async {
+    final res = await _dio.get<List<dynamic>>('/v1/admin/actions',
+        queryParameters: {'limit': limit}, options: _admin(totp));
+    return (res.data ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  Future<List<Map<String, dynamic>>> adminReports(String totp,
+      {String status = 'open'}) async {
+    final res = await _dio.get<List<dynamic>>('/v1/admin/reports',
+        queryParameters: {'status': status}, options: _admin(totp));
+    return (res.data ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  Future<void> adminResolveReport(String id, String totp,
+      {required String status, String? resolution}) async {
+    await _dio.post<void>('/v1/admin/reports/$id/resolve',
+        data: {'status': status, if (resolution != null) 'resolution': resolution},
+        options: _admin(totp));
+  }
 }

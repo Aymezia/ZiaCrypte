@@ -9,6 +9,7 @@ import '../../chat/data/chat_service.dart';
 import '../../chat/presentation/identity_avatar.dart';
 import '../../../core/update/update_service.dart';
 import 'backup_sheet.dart';
+import 'admin_screen.dart';
 import 'blocked_screen.dart';
 import 'devices_screen.dart';
 import 'two_factor_sheet.dart';
@@ -391,6 +392,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const Divider(height: 32),
+          // Visible seulement pour un compte administrateur. N'ouvre aucun
+          // accès aux messages : chaque action réclame ensuite un code 2FA, et
+          // le serveur ne peut de toute façon rien déchiffrer.
+          if (s.isAdmin) ...[
+            _section(theme, 'Modération'),
+            ListTile(
+              leading: Icon(Icons.shield_outlined,
+                  color: theme.colorScheme.primary),
+              title: const Text('Administration'),
+              subtitle: const Text(
+                  'Signalements, comptes, journal — code 2FA à chaque action'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => AdminScreen(service: s),
+              )),
+            ),
+          ],
           _section(theme, 'Application'),
           ListTile(
             leading: const Icon(Icons.system_update_alt),
