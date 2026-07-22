@@ -234,6 +234,25 @@ class ApiClient {
     });
   }
 
+  /// Dépose UN message de groupe chiffré une seule fois, pour tous les
+  /// appareils listés. Remplace autant d'appels à sendMessage qu'il y avait
+  /// d'appareils.
+  Future<void> sendGroupMessage({
+    required String conversationId,
+    required String clientMessageId,
+    required List<String> recipientDeviceIds,
+    required String headerB64,
+    required String ciphertextB64,
+  }) async {
+    await _dio.post<Map<String, dynamic>>('/v1/messages/group', data: {
+      'conversationId': conversationId,
+      'clientMessageId': clientMessageId,
+      'recipientDeviceIds': recipientDeviceIds,
+      'header': headerB64,
+      'ciphertext': ciphertextB64,
+    });
+  }
+
   /// Nombre de one-time prekeys encore disponibles pour cet appareil.
   Future<int> oneTimePrekeyCount(String deviceId) async {
     final res = await _dio.get<Map<String, dynamic>>('/v1/devices/$deviceId/prekeys');

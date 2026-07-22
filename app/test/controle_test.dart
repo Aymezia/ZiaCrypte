@@ -10,7 +10,10 @@
 // erreur : la photo n'arrive pas, et rien n'indique pourquoi.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:typed_data';
+
 import 'package:ziacrypte/features/chat/data/chat_service.dart';
+import 'package:ziacrypte/features/chat/data/envelope.dart';
 
 void main() {
   group('Messages de contrôle', () {
@@ -82,4 +85,29 @@ void main() {
       }
     });
   });
+
+  group('En-tête d’enveloppe', () {
+    test('un en-tête de groupe est reconnu comme tel', () {
+      expect(Envelope.estGroupe(Envelope.packGroupHeader()), isTrue);
+    });
+
+    test('les en-têtes pair-à-pair ne sont JAMAIS pris pour du groupe', () {
+      // Sinon ils seraient envoyés au déchiffrement par clé d'expéditeur, qui
+      // n'a aucune chance d'aboutir, et le message serait silencieusement perdu.
+      final sansHandshake = Envelope.packHeader(Uint8List.fromList([9, 9, 9]), null);
+      expect(Envelope.estGroupe(sansHandshake), isFalse);
+      expect(sansHandshake.first, 0);
+    });
+
+    test('un en-tête vide n’est pas pris pour du groupe', () {
+      expect(Envelope.estGroupe(Uint8List(0)), isFalse);
+    });
+  });
 }
+
+// -------------------------------------------------------- en-tête d'enveloppe
+//
+// Le premier octet aiguille la RÉCEPTION. S'il était mal reconnu, un message de
+// groupe partirait dans le décodeur pair-à-pair (et l'inverse) : le message
+// serait perdu sans exception claire — le genre de panne qui ne se voit qu'en
+// production.

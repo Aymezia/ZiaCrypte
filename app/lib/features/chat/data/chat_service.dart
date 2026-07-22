@@ -459,6 +459,7 @@ class ChatService extends ChangeNotifier {
     // ferait annoncer au compte suivant celui du précédent.
     _monJeton = null;
     _jetonAnnonce.clear();
+    _cleGroupeDistribuee.clear();
     activeConversationId = null;
     notifyListeners();
   }
@@ -779,6 +780,10 @@ class ChatService extends ChangeNotifier {
   /// partait jamais. Le chemin scellé ne pouvait s'activer que face à un
   /// correspondant tout neuf, jamais sur une conversation déjà entamée.
   final Set<String> _jetonAnnonce = {};
+
+  /// Clés d'expéditeur de groupe déjà distribuées : conversation -> appareils
+  /// servis. Sert à détecter tout changement de composition.
+  final Map<String, Set<String>> _cleGroupeDistribuee = {};
 
   /// Publie notre jeton auprès du serveur, une fois par session.
   ///
@@ -1171,6 +1176,9 @@ class ChatService extends ChangeNotifier {
   /// dépôt anonyme, sans révéler d'identité au serveur.
   static const _prefixeJeton = '__zia_dtok__:';
 
+  /// Distribution d'une clé d'expéditeur de groupe (phase 37).
+  static const _prefixeCleGroupe = '__zia_skey__:';
+
   /// Un texte est-il un message de CONTRÔLE plutôt qu'un message à afficher ?
   ///
   /// Exposé aux tests parce que l'oubli d'un préfixe dans cette liste est un
@@ -1189,6 +1197,10 @@ class ChatService extends ChangeNotifier {
     _prefixeLu,
     _prefixeAvatar,
     _prefixeTtl,
+    // Ces deux-là manquaient : _estControle les connaissait, mais pas cette
+    // liste — le test qui parcourt les préfixes ne les couvrait donc pas.
+    _prefixeJeton,
+    _prefixeCleGroupe,
   ];
 
   /// Encode l'annonce d'une photo de profil. Exposé aux tests : c'est la
@@ -1209,7 +1221,8 @@ class ChatService extends ChangeNotifier {
       t.startsWith(_prefixeLu) ||
       t.startsWith(_prefixeAvatar) ||
       t.startsWith(_prefixeTtl) ||
-      t.startsWith(_prefixeJeton);
+      t.startsWith(_prefixeJeton) ||
+      t.startsWith(_prefixeCleGroupe);
 
   /// Émission des accusés de lecture, pilotée par les préférences.
   bool accusesLectureActifs = false;
@@ -1368,6 +1381,65 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Garantit que NOTRE clé d'expéditeur est en place pour ce groupe et que
+  /// tous les appareils courants l'ont reçue.
+  ///
+  /// Renvoie false si le chemin groupé n'est pas utilisable — l'appelant
+  /// retombe alors sur l'envoi pair-à-pair, qui fonctionne toujours. Une
+  /// dégradation vaut mieux qu'un message que personne ne peut lire.
+  ///
+  /// ## Pourquoi on fait tourner la clé à toute entrée ET toute sortie
+  ///
+  /// À la sortie, c'est évident : sans rotation, un partant continuerait de
+  /// déchiffrer la suite. À l'ENTRÉE aussi, et c'est moins intuitif : la
+  /// distribution contient la chaîne à son origine, donc un arrivant pourrait
+  /// dériver les clés de TOUS les messages précédents. Repartir d'une chaîne
+  /// neuve est ce qui garantit qu'on ne lit pas l'avant de son arrivée.
+  Future<bool> _assurerCleGroupe(Conversation conv) async {
+    final gateway = _gateway;
+    if (gateway == null || !conv.isGroup) return false;
+
+    final cibles = conv.sessions.keys.toSet();
+    if (cibles.isEmpty) return false;
+
+    final servis = _cleGroupeDistribuee[conv.id];
+    // Composition inchangée : la clé en place reste valable.
+    if (servis != null &&
+        servis.length == cibles.length &&
+        servis.containsAll(cibles)) {
+      return true;
+    }
+
+    final Uint8List distribution;
+    try {
+      distribution = await gateway.engine.senderKeyCreate(conv.id);
+    } catch (_) {
+      return false;
+    }
+
+    final charge =
+        '$_prefixeCleGroupe${jsonEncode({'k': base64Encode(distribution)})}';
+    final ok = <String>{};
+    for (final device in cibles) {
+      try {
+        await _sendToDevice(conv, device, charge);
+        ok.add(device);
+      } catch (_) {
+        // Appareil injoignable : voir juste en dessous.
+      }
+    }
+
+    // Distribution INCOMPLÈTE : on ne bascule pas. Chiffrer une seule fois
+    // alors qu'un membre n'a pas la clé lui rendrait le message illisible
+    // sans qu'il puisse rien y faire.
+    if (ok.length != cibles.length) {
+      _cleGroupeDistribuee.remove(conv.id);
+      return false;
+    }
+    _cleGroupeDistribuee[conv.id] = ok;
+    return true;
+  }
+
   Future<void> _diffuserControle(Conversation conv, String charge) async {
     for (final device in conv.sessions.keys.toList()) {
       try {
@@ -1386,8 +1458,31 @@ class ChatService extends ChangeNotifier {
   /// arrive par la session de son auteur, la correspondance est garantie par le
   /// chiffrement lui-même.
   Future<void> _appliquerControle(
-      Conversation conv, String texte, bool deMoi) async {
+      Conversation conv, String texte, bool deMoi,
+      {String? expediteurDevice}) async {
     try {
+      // Distribution d'une clé d'expéditeur de groupe.
+      //
+      // L'émetteur est celui du TRANSPORT — la session pair-à-pair qui a porté
+      // ce contrôle — jamais un identifiant annoncé dans la charge. Sinon un
+      // membre du groupe pourrait enregistrer une clé au nom d'un autre et
+      // signer des messages en se faisant passer pour lui.
+      if (texte.startsWith(_prefixeCleGroupe)) {
+        if (expediteurDevice == null) return;
+        final json = jsonDecode(texte.substring(_prefixeCleGroupe.length))
+            as Map<String, dynamic>;
+        final k = json['k'] as String?;
+        if (k == null) return;
+        try {
+          await _gateway?.engine
+              .senderKeyProcess(conv.id, expediteurDevice, base64Decode(k));
+        } catch (_) {
+          // Distribution illisible : ses messages resteront indéchiffrables
+          // jusqu'à la prochaine, ce qui est préférable à un état incohérent.
+        }
+        return;
+      }
+
       // Jeton de remise d'un correspondant : c'est ce qui permet de lui
       // écrire ensuite SANS que le serveur sache que c'est nous.
       if (texte.startsWith(_prefixeJeton)) {
@@ -1736,9 +1831,33 @@ class ChatService extends ChangeNotifier {
       // interrogera pour savoir si le message a été remis.
       final receiptIds = <String>[];
 
+      // Chemin GROUPÉ : un seul chiffrement pour tout le groupe (clé
+      // d'expéditeur). Tenté d'abord ; en cas d'échec on retombe sur la boucle
+      // pair-à-pair ci-dessous, qui fonctionne toujours.
+      if (conv.isGroup && await _assurerCleGroupe(conv)) {
+        final cibles = conv.sessions.keys.toList();
+        try {
+          final chiffre = await gateway.engine.senderKeyEncrypt(conv.id, clearText);
+          final clientMessageId = _uuidV4();
+          await api.sendGroupMessage(
+            conversationId: conv.id,
+            clientMessageId: clientMessageId,
+            recipientDeviceIds: cibles,
+            headerB64: base64Encode(Envelope.packGroupHeader()),
+            ciphertextB64: base64Encode(chiffre),
+          );
+          receiptIds.add(clientMessageId);
+          delivered = cibles.length;
+        } catch (e) {
+          // On repart de zéro sur le chemin pair-à-pair.
+          delivered = 0;
+          error = 'Envoi groupé impossible, repli : ${_humanize(e)}';
+        }
+      }
+
       // Chaque appareil a sa propre session : le message est chiffré autant de
       // fois qu'il y a de destinataires. Le serveur ne voit que des blobs.
-      for (final device in conv.sessions.keys.toList()) {
+      for (final device in delivered > 0 ? const <String>[] : conv.sessions.keys.toList()) {
         final sessionId = conv.sessions[device];
         if (sessionId == null) continue;
         try {
@@ -2202,41 +2321,60 @@ class ChatService extends ChangeNotifier {
         if (m == null) continue; // enveloppe illisible : déjà signalée
         final conv = await _resolveConversation(m);
         final sender = m['senderDeviceId'] as String;
-        final unpacked =
-            Envelope.unpackHeader(base64Decode(m['header'] as String));
+        final enteteBrute = base64Decode(m['header'] as String);
+        Uint8List? clair;
 
-        // Chaque appareil expéditeur a sa propre session : la première
-        // réception depuis un appareil nous en fait le répondeur.
-        if (unpacked.handshake != null && !conv.sessions.containsKey(sender)) {
-          // Second point d'entrée d'une clé d'identité — celui-ci vient du
-          // handshake, pas d'un bundle. Sans le même contrôle qu'à l'émission,
-          // il suffirait au serveur de nous faire recevoir en premier pour
-          // contourner l'épinglage.
-          final senderUserId = m['senderUserId'] as String?;
-          if (senderUserId != null) {
-            try {
-              await _pinning?.checkAndPin(
-                deviceId: sender,
-                userId: senderUserId,
-                identityKey: unpacked.handshake!.initiatorIdentityKey,
-              );
-            } on IdentityChangedException catch (alert) {
-              identityAlerts[sender] = alert;
-              notifyListeners();
-              continue; // message non déchiffré tant que ce n'est pas tranché
-            }
+        // Message de GROUPE chiffré une seule fois : il ne passe par aucune
+        // session pair-à-pair. On le déchiffre avec la chaîne de l'appareil
+        // émetteur ; sa signature est vérifiée côté moteur AVANT tout
+        // déchiffrement, ce qui empêche un membre d'écrire au nom d'un autre.
+        if (Envelope.estGroupe(enteteBrute)) {
+          try {
+            clair = await gateway.engine.senderKeyDecrypt(
+                conv.id, sender, base64Decode(m['ciphertext'] as String));
+          } catch (_) {
+            // Clé d'expéditeur pas encore reçue, ou message antérieur à la
+            // dernière rotation : indéchiffrable, et le rester est correct.
+            continue;
           }
-          conv.sessions[sender] = await gateway.acceptSession(unpacked.handshake!);
-          conv.targetDeviceIds.add(sender);
-        }
-        final sessionId = conv.sessions[sender];
-        if (sessionId == null) continue;
+        } else {
 
-        final plain = await gateway.decrypt(
-          sessionId,
-          unpacked.ratchetHeader,
-          base64Decode(m['ciphertext'] as String),
-        );
+          final unpacked = Envelope.unpackHeader(enteteBrute);
+
+          // Chaque appareil expéditeur a sa propre session : la première
+          // réception depuis un appareil nous en fait le répondeur.
+          if (unpacked.handshake != null && !conv.sessions.containsKey(sender)) {
+            // Second point d'entrée d'une clé d'identité — celui-ci vient du
+            // handshake, pas d'un bundle. Sans le même contrôle qu'à l'émission,
+            // il suffirait au serveur de nous faire recevoir en premier pour
+            // contourner l'épinglage.
+            final senderUserId = m['senderUserId'] as String?;
+            if (senderUserId != null) {
+              try {
+                await _pinning?.checkAndPin(
+                  deviceId: sender,
+                  userId: senderUserId,
+                  identityKey: unpacked.handshake!.initiatorIdentityKey,
+                );
+              } on IdentityChangedException catch (alert) {
+                identityAlerts[sender] = alert;
+                notifyListeners();
+                continue; // message non déchiffré tant que ce n'est pas tranché
+              }
+            }
+            conv.sessions[sender] = await gateway.acceptSession(unpacked.handshake!);
+            conv.targetDeviceIds.add(sender);
+          }
+          final sessionId = conv.sessions[sender];
+          if (sessionId == null) continue;
+
+            clair = await gateway.decrypt(
+              sessionId,
+              unpacked.ratchetHeader,
+              base64Decode(m['ciphertext'] as String),
+            );
+        }
+        final plain = clair;
 
         // Un message émis par un autre de mes appareils est un message que
         // j'ai écrit : il s'affiche comme tel plutôt que comme reçu.
@@ -2245,7 +2383,8 @@ class ChatService extends ChangeNotifier {
 
         // Message de contrôle : édition ou suppression d'un message existant.
         if (_estControle(payload.text)) {
-          await _appliquerControle(conv, payload.text, fromMyself);
+          await _appliquerControle(conv, payload.text, fromMyself,
+              expediteurDevice: sender);
           continue;
         }
 

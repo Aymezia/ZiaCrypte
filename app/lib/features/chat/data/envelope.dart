@@ -11,7 +11,18 @@ import '../domain/crypto_models.dart';
 ///
 ///   1er message : [1][IK 32][EK 32][hasOtpk 1][OTPK 32][ratchetHeader]
 ///   suivants    : [0][ratchetHeader]
+///   groupe      : [2]  — clé d'expéditeur : le message porte lui-même son
+///                       itération et sa signature, aucun en-tête de ratchet.
 class Envelope {
+  /// En-tête d'un message de groupe chiffré avec la clé d'expéditeur.
+  /// Un seul octet : tout le reste (itération, signature) voyage dans le
+  /// message lui-même, produit par le moteur.
+  static Uint8List packGroupHeader() => Uint8List.fromList(const [2]);
+
+  /// Ce blob est-il un message de groupe ? À tester AVANT unpackHeader, qui ne
+  /// connaît que les deux formats pair-à-pair.
+  static bool estGroupe(Uint8List packed) => packed.isNotEmpty && packed[0] == 2;
+
   static Uint8List packHeader(Uint8List ratchetHeader, HandshakeMaterial? handshake) {
     final out = BytesBuilder();
     if (handshake == null) {
