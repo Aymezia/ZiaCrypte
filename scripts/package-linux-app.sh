@@ -32,7 +32,7 @@ g++ -std=c++20 -O2 -DNDEBUG -fPIC -shared \
   "$ENGINE/src/primitives/primitives.cpp" \
   "$ENGINE/src/storage/identity_store.cpp" \
   "$ENGINE/src/storage/secure_blob.cpp" "$ENGINE/src/vault.cpp" \
-  "$ENGINE/src/attachment.cpp" "$ENGINE/src/safety_number.cpp" "$ENGINE/src/release_signature.cpp" "$ENGINE/src/backup.cpp" "$ENGINE/src/applock.cpp" "$ENGINE/src/sealed_sender.cpp" \
+  "$ENGINE/src/attachment.cpp" "$ENGINE/src/safety_number.cpp" "$ENGINE/src/release_signature.cpp" "$ENGINE/src/backup.cpp" "$ENGINE/src/applock.cpp" "$ENGINE/src/sealed_sender.cpp" "$ENGINE/src/sender_keys.cpp" \
   "$ENGINE/platform/linux/secure_key_store_linux.cpp" \
   -o "$TMP_SO" \
   -Wl,--exclude-libs,ALL "$SODIUM_A" $(pkg-config --libs libsecret-1)

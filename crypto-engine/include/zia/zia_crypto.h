@@ -220,6 +220,48 @@ ZIA_API ZiaStatus zia_secure_read(ZiaEngine* engine, const char* name,
 ZIA_API ZiaStatus zia_secure_erase(ZiaEngine* engine, const char* name);
 
 /* ================= Persistance de session ================= */
+/* ------------------------------------------------------------------ groupes
+ *
+ * Clés d'expéditeur (« sender keys »).
+ *
+ * Sans elles, un message de groupe est chiffré UNE FOIS PAR APPAREIL
+ * destinataire : dix membres à deux appareils, c'est vingt chiffrements et
+ * vingt blobs pour un seul message. Avec elles, l'expéditeur chiffre une fois
+ * avec une clé de chaîne propre au groupe, qu'il a distribuée à chaque membre
+ * par le canal pair-à-pair DÉJÀ chiffré. Le coût cesse de croître avec la
+ * taille du groupe.
+ *
+ * Ce que ça ne change pas : le serveur ne voit toujours que du chiffré, et
+ * chaque message reste signé par son auteur (Ed25519) — un membre ne peut donc
+ * pas se faire passer pour un autre, alors même qu'ils partagent la clé du
+ * groupe. C'est ce qui distingue « chiffré pour le groupe » de « n'importe qui
+ * dans le groupe peut forger n'importe quoi ».
+ */
+
+/* Crée (ou fait tourner) NOTRE clé d'expéditeur pour ce groupe, et renvoie le
+ * message de distribution à transmettre à chaque membre par le canal chiffré.
+ * À refaire quand la composition du groupe change : un partant ne doit plus
+ * pouvoir lire la suite. */
+ZIA_API ZiaStatus zia_sender_key_create(ZiaEngine* engine, const char* group_id,
+                                        uint8_t** out_distribution, size_t* out_len);
+
+/* Enregistre la clé d'expéditeur d'un membre, reçue par le canal chiffré. */
+ZIA_API ZiaStatus zia_sender_key_process(ZiaEngine* engine, const char* group_id,
+                                         const char* sender_id,
+                                         const uint8_t* distribution, size_t len);
+
+/* Chiffre un message UNE SEULE FOIS pour tout le groupe. */
+ZIA_API ZiaStatus zia_sender_key_encrypt(ZiaEngine* engine, const char* group_id,
+                                         const uint8_t* plaintext, size_t plaintext_len,
+                                         uint8_t** out, size_t* out_len);
+
+/* Déchiffre un message de groupe. La signature est vérifiée AVANT tout
+ * déchiffrement : on ne traite pas les octets d'un expéditeur non authentifié. */
+ZIA_API ZiaStatus zia_sender_key_decrypt(ZiaEngine* engine, const char* group_id,
+                                         const char* sender_id,
+                                         const uint8_t* message, size_t message_len,
+                                         uint8_t** out, size_t* out_len);
+
 ZIA_API ZiaStatus zia_session_serialize(ZiaSession* session, uint8_t** out, size_t* out_len);
 ZIA_API ZiaStatus zia_session_deserialize(ZiaEngine* engine, const uint8_t* data, size_t len,
                                          ZiaSession** out_session);

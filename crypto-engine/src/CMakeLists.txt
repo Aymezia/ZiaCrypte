@@ -13,6 +13,7 @@ add_library(zia_crypto SHARED
     backup.cpp
     applock.cpp
     sealed_sender.cpp
+    sender_keys.cpp
     release_signature.cpp
 )
 

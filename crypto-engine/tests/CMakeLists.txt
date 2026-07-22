@@ -47,3 +47,7 @@ add_test(NAME backup COMMAND zia_backup_test)
 add_executable(zia_sealed_sender_test sealed_sender_test.cpp)
 target_link_libraries(zia_sealed_sender_test PRIVATE zia_crypto)
 add_test(NAME sealed_sender COMMAND zia_sealed_sender_test)
+
+add_executable(zia_sender_keys_test sender_keys_test.cpp)
+target_link_libraries(zia_sender_keys_test PRIVATE zia_crypto)
+add_test(NAME sender_keys COMMAND zia_sender_keys_test)
