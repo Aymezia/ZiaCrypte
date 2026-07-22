@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
 import { requireAuth } from '../../plugins/auth.js';
+import { messageRateLimit } from '../../plugins/rate-limit.js';
 import { estBloque } from '../blocks/blocks.routes.js';
 import { gateway } from '../../ws/gateway.js';
 import { requireMembership } from '../conversations/membership.js';
@@ -29,7 +30,7 @@ const sendSchema = z.object({
 export async function messagesRoutes(app: FastifyInstance) {
   // Dépose un blob chiffré à destination d'un appareil. Le serveur ne fait que
   // relayer des octets opaques — il ne peut rien déchiffrer.
-  app.post('/messages', { preHandler: requireAuth }, async (request, reply) => {
+  app.post('/messages', { preHandler: requireAuth, config: messageRateLimit() }, async (request, reply) => {
     const body = sendSchema.parse(request.body);
     const me = request.auth!;
 

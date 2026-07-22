@@ -111,3 +111,54 @@ export function registrationRateLimit() {
     },
   };
 }
+
+/**
+ * Limite d'envoi de messages, indexée sur l'appareil expéditeur.
+ *
+ * On compte par appareil authentifié, pas par adresse : un compte qui inonde le
+ * fait quel que soit son réseau, et beaucoup d'utilisateurs légitimes partagent
+ * une même adresse (NAT, université, opérateur mobile) — les compter ensemble
+ * punirait les innocents. Repli sur l'adresse si l'authentification n'a pas
+ * encore renseigné `request.auth`, pour ne jamais laisser la route sans borne.
+ *
+ * Ne lit AUCUN contenu : seul le rythme d'envoi entre dans la décision.
+ */
+export function messageRateLimit() {
+  return {
+    rateLimit: {
+      hook: 'preHandler' as const,
+      max: env.RATE_LIMIT_MESSAGE_MAX,
+      timeWindow: env.RATE_LIMIT_MESSAGE_WINDOW,
+      keyGenerator: (request: FastifyRequest) =>
+        `msg:${request.auth?.deviceId ?? request.ip}`,
+      errorResponseBuilder: () => ({
+        statusCode: 429,
+        error: 'Too Many Requests',
+        message: 'trop de messages envoyés coup sur coup, réessaie dans un instant',
+      }),
+    },
+  };
+}
+
+/**
+ * Limite de dépôt de signalements, indexée sur le compte signaleur.
+ *
+ * Empêche que l'outil de modération devienne lui-même un moyen de harcèlement :
+ * sans borne, un compte pourrait noyer un autre sous les dénonciations.
+ */
+export function reportRateLimit() {
+  return {
+    rateLimit: {
+      hook: 'preHandler' as const,
+      max: env.RATE_LIMIT_REPORT_MAX,
+      timeWindow: env.RATE_LIMIT_REPORT_WINDOW,
+      keyGenerator: (request: FastifyRequest) =>
+        `report:${request.auth?.userId ?? request.ip}`,
+      errorResponseBuilder: () => ({
+        statusCode: 429,
+        error: 'Too Many Requests',
+        message: 'trop de signalements envoyés, réessaie plus tard',
+      }),
+    },
+  };
+}

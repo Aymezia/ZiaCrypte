@@ -49,6 +49,15 @@ const schema = z.object({
   RATE_LIMIT_PASSWORD_WINDOW: z.string().default('5 minutes'),
   RATE_LIMIT_REGISTER_MAX: z.coerce.number().default(5),
   RATE_LIMIT_REGISTER_WINDOW: z.string().default('1 hour'),
+  // Envoi de messages : plafond par appareil expéditeur, pas par adresse — un
+  // compte qui inonde le fait quel que soit son réseau. Large : une
+  // conversation active envoie vite plusieurs messages par seconde en rafale.
+  RATE_LIMIT_MESSAGE_MAX: z.coerce.number().default(120),
+  RATE_LIMIT_MESSAGE_WINDOW: z.string().default('1 minute'),
+  // Signalements : bornés pour que l'outil de modération ne devienne pas lui-
+  // même un moyen de harcèlement (dénonciations en masse).
+  RATE_LIMIT_REPORT_MAX: z.coerce.number().default(20),
+  RATE_LIMIT_REPORT_WINDOW: z.string().default('1 hour'),
 
   // Rétention. Un blob déjà relevé est inatteignable par son destinataire :
   // le conserver ne sert plus la remise, seulement à accumuler du chiffré et

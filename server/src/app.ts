@@ -5,6 +5,7 @@ import { registerRateLimit, TRUSTED_PROXIES } from './plugins/rate-limit.js';
 import { adminRoutes, passwordResetRoutes } from './modules/admin/admin.routes.js';
 import { sealedRoutes } from './modules/messages/sealed.routes.js';
 import { blocksRoutes } from './modules/blocks/blocks.routes.js';
+import { reportsRoutes } from './modules/reports/reports.routes.js';
 import { attachmentsRoutes } from './modules/attachments/attachments.routes.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js';
@@ -58,6 +59,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await pushRoutes(v1);
       await sealedRoutes(v1);
       await blocksRoutes(v1);
+      await reportsRoutes(v1);
       await adminRoutes(v1);
       await passwordResetRoutes(v1);
     },

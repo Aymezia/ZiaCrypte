@@ -337,6 +337,74 @@ model AdminAction {
   @@map("admin_actions")
 }
 
+enum ReportStatus {
+  open
+  resolved
+  dismissed
+}
+
+/**
+ * Signalement d'un contenu abusif.
+ *
+ * ## Pourquoi le serveur détient ici du texte en clair — et seulement ici
+ *
+ * Le serveur ne peut pas lire les messages : il n'a aucune clé. La modération
+ * ne peut donc PAS partir de lui. Elle part de celui qui REÇOIT : lui seul a
+ * déchiffré le message, lui seul peut décider de le révéler. Ce modèle stocke
+ * exactement ce qu'un destinataire a CHOISI de transmettre pour dénoncer un
+ * abus — pas ce que le serveur aurait intercepté. Le chiffrement de bout en
+ * bout n'est pas contourné : il est respecté, et le seul à pouvoir lever le
+ * voile est la victime, sur son propre message.
+ *
+ * `content` est ce clair volontairement fourni. Il peut être vide : un
+ * signalement reste recevable même sans copie du message (harcèlement répété,
+ * spam), le nom du compte visé suffit à agir.
+ *
+ * ## Sans clés étrangères vers les comptes
+ *
+ * Comme AdminAction : un signalement doit survivre à la suppression du compte
+ * qu'il vise ou de celui qui l'a émis — sinon supprimer un compte effacerait
+ * les preuves qui justifiaient de le supprimer. On garde les identifiants ET
+ * les noms au moment du signalement.
+ */
+model Report {
+  id String @id @default(uuid()) @db.Uuid
+
+  reporterUserId String? @map("reporter_user_id") @db.Uuid
+  reporterLabel  String? @map("reporter_label")
+
+  reportedUserId String? @map("reported_user_id") @db.Uuid
+  reportedLabel  String? @map("reported_label")
+
+  // Motif court (spam, harcèlement, contenu_illegal, arnaque, autre) tel que
+  // choisi par le signaleur. Texte libre borné plutôt qu'enum : la liste des
+  // motifs relève de la charte, susceptible d'évoluer sans migration.
+  reason String
+
+  // Note libre du signaleur, et copie EN CLAIR du message qu'il a choisi de
+  // transmettre. Tous deux facultatifs.
+  note    String? @db.Text
+  content String? @db.Text
+
+  // Contexte technique éventuel (identifiant de conversation, horodatages),
+  // sérialisé par le client. Aide à recouper sans jamais rien déchiffrer.
+  context String? @db.Text
+
+  status ReportStatus @default(open)
+
+  // Traitement : qui a tranché, quand, et ce qui a été décidé. Le compte visé
+  // n'est jamais lu — la décision porte sur le compte, pas sur d'autres messages.
+  handledByUserId String?   @map("handled_by_user_id") @db.Uuid
+  handledAt       DateTime? @map("handled_at")
+  resolution      String?   @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([status, createdAt])
+  @@index([reportedUserId])
+  @@map("reports")
+}
+
 model AuditLog {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String?  @map("user_id") @db.Uuid

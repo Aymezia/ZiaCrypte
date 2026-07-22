@@ -78,7 +78,7 @@ export async function authRoutes(app: FastifyInstance) {
     });
 
     const tokens = await createSession(device.userId, device.id);
-    return reply.code(201).send({ userId: device.userId, deviceId: device.id, ...tokens });
+    return reply.code(201).send({ userId: device.userId, deviceId: device.id, role: 'user', ...tokens });
   });
 
   app.post('/auth/login', { config: passwordRateLimit() }, async (request, reply) => {
@@ -106,7 +106,7 @@ export async function authRoutes(app: FastifyInstance) {
     });
 
     const tokens = await createSession(user.id, device.id);
-    return reply.send({ userId: user.id, deviceId: device.id, ...tokens });
+    return reply.send({ userId: user.id, deviceId: device.id, role: user.role, ...tokens });
   });
 
   // Rattache un NOUVEL appareil à un compte existant : c'est ce qui permet
@@ -129,7 +129,7 @@ export async function authRoutes(app: FastifyInstance) {
     );
 
     const tokens = await createSession(user.id, device.id);
-    return reply.code(201).send({ userId: user.id, deviceId: device.id, ...tokens });
+    return reply.code(201).send({ userId: user.id, deviceId: device.id, role: user.role, ...tokens });
   });
 
   app.post('/auth/refresh', async (request, reply) => {
@@ -159,7 +159,13 @@ export async function authRoutes(app: FastifyInstance) {
       data: { revokedAt: new Date() },
     });
     const tokens = await createSession(claims.sub, claims.did);
-    return reply.send({ userId: claims.sub, deviceId: claims.did, ...tokens });
+    // Le rôle est relu ici : la session ne le stocke pas, et le client en a
+    // besoin pour (ré)afficher l'entrée d'administration après un rafraîchissement.
+    const compte = await prisma.user.findUnique({
+      where: { id: claims.sub },
+      select: { role: true },
+    });
+    return reply.send({ userId: claims.sub, deviceId: claims.did, role: compte?.role ?? 'user', ...tokens });
   });
 
   // ----------------------------------------------------- second facteur (TOTP)
