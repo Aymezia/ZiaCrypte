@@ -145,22 +145,37 @@ class UpdateInstaller {
 
     if (Platform.isWindows) {
       final chemin = '$dossier${sep}zia_update.bat';
-      // `tasklist` sert de test de vie : tant que le PID répond, les fichiers
-      // sont verrouillés. La boucle est bornée pour ne jamais tourner sans fin.
+      final exeName = exe.split(sep).last;
+      // `tasklist` sert de test de vie : tant que le PID de ZiaCrypte répond,
+      // ses fichiers sont verrouillés et la copie échouerait. On lui laisse un
+      // court délai pour se fermer proprement (l'application appelle exit(0)),
+      // puis on la FERME de force si elle s'attarde. Sans ce taskkill, un
+      // exit(0) qui n'aboutit pas — ce qui arrive sur certaines configurations
+      // Windows — laissait le script attendre indéfiniment : l'utilisateur
+      // devait fermer la fenêtre à la main pour que la mise à jour reprenne.
+      //
+      // La copie utilise robocopy, pas xcopy : xcopy demande parfois
+      // « F = fichier / D = dossier ? » et bloque alors le script en attente
+      // d'une saisie qui ne vient jamais. robocopy ne pose aucune question et
+      // son nombre d'essais est borné (/R:3 /W:1) pour ne pas boucler si un
+      // fichier restait verrouillé.
       await File(chemin).writeAsString('''
 @echo off
 setlocal
 set /a n=0
 :attente
-tasklist /FI "PID eq $pid" 2>nul | find "$pid" >nul || goto copie
+tasklist /FI "PID eq $pid" /FI "IMAGENAME eq $exeName" 2>nul | find "$pid" >nul || goto copie
 set /a n+=1
-if %n% GEQ 60 goto copie
+if %n% GEQ 15 goto forcer
 ping -n 2 127.0.0.1 >nul
 goto attente
+:forcer
+taskkill /F /PID $pid >nul 2>&1
+ping -n 3 127.0.0.1 >nul
 :copie
-xcopy /E /Y /Q "$staging\\*" "$install\\" >nul
-rmdir /S /Q "$staging"
-rmdir /S /Q "$telechargement"
+robocopy "$staging" "$install" /E /R:3 /W:1 /NFL /NDL /NJH /NJS /NP >nul
+rmdir /S /Q "$staging" >nul 2>&1
+rmdir /S /Q "$telechargement" >nul 2>&1
 start "" "$exe"
 ''');
       return chemin;
