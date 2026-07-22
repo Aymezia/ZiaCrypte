@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { HttpError } from '../../lib/errors.js';
 import { requireAuth } from '../../plugins/auth.js';
+import { gateway } from '../../ws/gateway.js';
 
 /**
  * Blocage de comptes.
@@ -49,6 +50,11 @@ export async function blocksRoutes(app: FastifyInstance) {
       create: { blockerUserId: me, blockedUserId: userId },
       update: {},
     });
+
+    // La présence est autorisée une fois pour toutes à l'abonnement : sans
+    // cette coupure, les deux comptes continueraient de se voir « en ligne »
+    // jusqu'à leur prochaine reconnexion.
+    await gateway?.revoquerPresence(me, userId);
 
     return reply.code(204).send();
   });
