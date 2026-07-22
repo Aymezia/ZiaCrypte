@@ -27,6 +27,15 @@ const sendSchema = z.object({
   ciphertext: z.string(), // opaque : AEAD
 });
 
+const groupSendSchema = z.object({
+  conversationId: z.string().uuid(),
+  clientMessageId: z.string().uuid(),
+  // Tous les appareils du groupe, le nôtre exclu par le client.
+  recipientDeviceIds: z.array(z.string().uuid()).min(1).max(500),
+  header: z.string(),
+  ciphertext: z.string(),
+});
+
 export async function messagesRoutes(app: FastifyInstance) {
   // Dépose un blob chiffré à destination d'un appareil. Le serveur ne fait que
   // relayer des octets opaques — il ne peut rien déchiffrer.
@@ -87,6 +96,71 @@ export async function messagesRoutes(app: FastifyInstance) {
       throw e;
     }
   });
+
+  /**
+   * Dépôt d'un message de GROUPE chiffré une seule fois (clés d'expéditeur).
+   *
+   * Le client chiffre UNE fois avec la clé de groupe puis dépose ici, en
+   * nommant tous les appareils destinataires. Sans cette route, il devait
+   * chiffrer et téléverser une fois par appareil : dix membres à deux
+   * appareils, c'était vingt requêtes pour un message.
+   *
+   * ## Ce que le serveur fait, et ne fait pas
+   *
+   * Il écrit une ligne de remise par destinataire, toutes portant LES MÊMES
+   * octets. Le chiffré est donc dupliqué en base — c'est un choix assumé : le
+   * gain visé (le coût côté client et la bande passante) est intégralement
+   * obtenu, et déduplique-r plus tard ne changera rien pour les clients déjà
+   * déployés. Il ne peut toujours rien déchiffrer : la clé de groupe n'a jamais
+   * transité par lui, elle a été distribuée dans le canal pair-à-pair.
+   */
+  app.post('/messages/group', { preHandler: requireAuth, config: messageRateLimit() },
+    async (request, reply) => {
+      const body = groupSendSchema.parse(request.body);
+      const me = request.auth!;
+
+      await requireMembership(body.conversationId, me.userId);
+
+      const devices = await prisma.device.findMany({
+        where: { id: { in: body.recipientDeviceIds }, isActive: true },
+        select: { id: true, userId: true },
+      });
+
+      // Blocages appliqués destinataire par destinataire, en silence : celui
+      // qui bloque ne doit pas être trahi, et l'expéditeur ne doit pas
+      // apprendre qu'il l'est. On n'écrit simplement pas sa ligne.
+      const bloques = await Promise.all(
+        devices.map((d) => estBloque(me.userId, d.userId)),
+      );
+      const cibles = devices.filter((_, i) => !bloques[i]);
+
+      const header = fromB64(body.header);
+      const ciphertext = fromB64(body.ciphertext);
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      // skipDuplicates : (recipientDeviceId, clientMessageId) est unique, un
+      // renvoi après coupure réseau ne doit pas échouer ni dupliquer.
+      await prisma.messageBlob.createMany({
+        data: cibles.map((d) => ({
+          conversationId: body.conversationId,
+          senderDeviceId: me.deviceId,
+          recipientDeviceId: d.id,
+          clientMessageId: body.clientMessageId,
+          ratchetHeader: header,
+          ciphertext,
+          expiresAt,
+        })),
+        skipDuplicates: true,
+      });
+
+      for (const d of cibles) {
+        if (!gateway?.notifyPending(d.id)) void pushService?.wakeDevice(d.id);
+      }
+
+      // Le nombre d'appareils servis n'est pas renvoyé : il varie selon les
+      // blocages, et le publier apprendrait à l'expéditeur qu'il est bloqué.
+      return reply.code(201).send({ ok: true });
+    });
 
   /**
    * Statut de remise des messages que l'appareil courant a ENVOYÉS.
