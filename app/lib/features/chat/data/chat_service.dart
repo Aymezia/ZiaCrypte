@@ -18,6 +18,7 @@ import '../domain/crypto_models.dart';
 import 'identity_pinning.dart';
 import 'envelope.dart';
 import 'ffi_crypto_gateway.dart';
+import 'padding.dart';
 
 export '../domain/chat_message.dart';
 export '../domain/conversation.dart';
@@ -2156,7 +2157,11 @@ class ChatService extends ChangeNotifier {
     String? messageId,
     ChatMessage? replyTo,
   }) {
-    return Uint8List.fromList(utf8.encode(jsonEncode({
+    // Bourré à un palier fixe : c'est le SEUL point de passage de tout ce qui
+    // est chiffré — messages, contrôles, distributions de clé de groupe — donc
+    // le seul endroit où la taille peut être uniformisée une fois pour toutes.
+    // Voir padding.dart pour ce que la taille révélait.
+    return bourrer(utf8.encode(jsonEncode({
       't': text,
       if (attachment != null) 'f': attachment.toJson(),
       if (messageId != null) 'i': messageId,
