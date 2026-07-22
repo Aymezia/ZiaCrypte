@@ -26,6 +26,15 @@ export '../domain/conversation.dart';
 /// serveur. Aucune cryptographie ici — tout passe par le [FfiCryptoGateway].
 class ChatService extends ChangeNotifier {
   ApiClient? _api;
+
+  /// Fabrique du client API.
+  ///
+  /// Surchargeable par les tests pour OBSERVER les appels réellement émis.
+  /// C'est la seule façon d'affirmer qu'un chemin est emprunté et pas seulement
+  /// qu'il compile — la phase 33 était écrite, testée et inerte faute d'un tel
+  /// contrôle.
+  @visibleForTesting
+  static ApiClient Function(String baseUrl) fabriqueApi = ApiClient.new;
   FfiCryptoGateway? _gateway;
   IdentityPinning? _pinning;
 
@@ -253,7 +262,7 @@ class ChatService extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
-      final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
+      final api = fabriqueApi(serverUrl ?? AppConfig.serverUrl);
       // Dossier neuf tiré au hasard : le moteur n'y trouve aucune identité et
       // en engendre une. Sans ça, créer un second compte sur cette machine
       // réutiliserait la paire de clés du premier.
@@ -303,7 +312,7 @@ class ChatService extends ChangeNotifier {
   }) async {
     _setBusy(true);
     try {
-      final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
+      final api = fabriqueApi(serverUrl ?? AppConfig.serverUrl);
       // Dossier neuf : cet appareil a sa propre identité, distincte de celle
       // des autres appareils du compte.
       final storageKey = _uuidV4();
@@ -355,7 +364,7 @@ class ChatService extends ChangeNotifier {
     }
     _setBusy(true);
     try {
-      final api = ApiClient(serverUrl ?? AppConfig.serverUrl);
+      final api = fabriqueApi(serverUrl ?? AppConfig.serverUrl);
       final gateway = await _openGateway(account.enginePath);
       final res = await api.login(
         username: account.username,
