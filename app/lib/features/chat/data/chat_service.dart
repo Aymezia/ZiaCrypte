@@ -126,6 +126,84 @@ class ChatService extends ChangeNotifier {
   bool _settingsEcriture = true;
   set indicateurEcritureActif(bool v) => _settingsEcriture = v;
 
+  /// Appareils actuellement vus en ligne.
+  ///
+  /// N'est renseigné que par la passerelle, et remis à zéro dès que le temps
+  /// réel tombe : afficher « en ligne » alors qu'on n'a plus de canal pour
+  /// apprendre le contraire figerait l'indicateur sur une information fausse.
+  final Set<String> _enLigne = {};
+
+  /// Dernier abonnement envoyé, pour ne pas le réémettre à l'identique toutes
+  /// les quinze secondes.
+  Set<String> _abonnementPresence = {};
+
+  /// Le correspondant de cette conversation est-il joignable ?
+  ///
+  /// Un appareil suffit : quelqu'un dont le téléphone est connecté est
+  /// joignable, que son ordinateur le soit ou non.
+  bool enLigneDans(String conversationId) {
+    final conv = _conversations[conversationId];
+    if (conv == null) return false;
+    return conv.sessions.keys
+        .any((d) => !conv.ownDeviceIds.contains(d) && _enLigne.contains(d));
+  }
+
+  /// Partage de sa propre présence, désactivable par l'utilisateur.
+  ///
+  /// DÉSACTIVÉ par défaut, comme les accusés de lecture : apparaître « en
+  /// ligne » dit à quelle heure on ouvre l'application, donc quand on dort et
+  /// quand on travaille. Personne ne doit livrer cela sans l'avoir choisi.
+  ///
+  /// Observer les autres reste possible sans partager : la réciprocité imposée
+  /// par certaines messageries est une règle de politesse, pas de sécurité, et
+  /// elle revient à faire payer un réglage de vie privée par un autre.
+  bool _settingsPresence = false;
+  set partagePresenceActif(bool v) {
+    if (v == _settingsPresence) return;
+    _settingsPresence = v;
+    _declarerPresence();
+  }
+
+  /// Annonce (ou retire) sa visibilité à la passerelle.
+  void _declarerPresence() {
+    final socket = _socket;
+    if (socket == null) return;
+    try {
+      socket.add(jsonEncode({'type': 'presence.mode', 'visible': _settingsPresence}));
+    } catch (_) {
+      // la présence est un confort : son échec n'a aucune conséquence
+    }
+  }
+
+  /// Réabonne aux appareils des conversations ouvertes, si la liste a changé.
+  ///
+  /// Appelé à la connexion puis par la boucle périodique : une session ouverte
+  /// entre deux relevés doit finir par apparaître, sans qu'il faille brancher
+  /// un rappel dans chacun des endroits qui créent une session.
+  void _rafraichirAbonnementPresence() {
+    final socket = _socket;
+    if (socket == null) return;
+    final cibles = <String>{};
+    for (final conv in _conversations.values) {
+      for (final device in conv.sessions.keys) {
+        if (!conv.ownDeviceIds.contains(device)) cibles.add(device);
+      }
+    }
+    if (cibles.length == _abonnementPresence.length &&
+        cibles.containsAll(_abonnementPresence)) {
+      return;
+    }
+    _abonnementPresence = cibles;
+    try {
+      socket.add(jsonEncode({
+        'type': 'presence.subscribe',
+        'devices': cibles.toList(),
+      }));
+    } catch (_) {
+      // idem : un abonnement manqué sera retenté au prochain relevé
+    }
+  }
+
   void startReply(ChatMessage m) {
     replyingTo = m;
     notifyListeners();
@@ -464,6 +542,8 @@ class ChatService extends ChangeNotifier {
     isAdmin = false;
     _conversations.clear();
     _pendingHandshakes.clear();
+    _enLigne.clear();
+    _abonnementPresence = {};
     // Le jeton de remise appartient à la session qui se ferme. Le conserver
     // ferait annoncer au compte suivant celui du précédent.
     _monJeton = null;
@@ -1041,6 +1121,10 @@ class ChatService extends ChangeNotifier {
       conv.sessions[device] = init.sessionId;
       _pendingHandshakes['${conv.id}-$device'] = init.handshake;
     }
+    // Un appareil de plus à observer. Sans ce rappel, la pastille n'apparaîtrait
+    // qu'au prochain relevé périodique — quinze secondes après l'ouverture de la
+    // conversation, là où on la regarde justement.
+    _rafraichirAbonnementPresence();
   }
 
   /// Crée un groupe avec les pseudos donnés et ouvre les sessions.
@@ -2230,6 +2314,7 @@ class ChatService extends ChangeNotifier {
       _pollOnce();
       _checkDeliveries();
       _syncSiblings();
+      _rafraichirAbonnementPresence();
       _balayerExpires();
       // Jeton de remise en attente : diffusé dès qu'une session existe. Passé
       // par la boucle plutôt qu'appelé au milieu de l'ouverture des sessions,
@@ -2254,6 +2339,13 @@ class ChatService extends ChangeNotifier {
       realtime = true;
       notifyListeners();
 
+      // Présence : on déclare d'abord ce que l'on accepte de montrer, puis on
+      // demande ce que l'on veut voir. L'ordre importe peu au serveur, mais il
+      // dit l'intention — rien n'est observé sans que le sien soit tranché.
+      _declarerPresence();
+      _abonnementPresence = {};
+      _rafraichirAbonnementPresence();
+
       socket.listen(
         (event) {
           if (event is! String) return;
@@ -2277,17 +2369,44 @@ class ChatService extends ChangeNotifier {
   void _onRealtimeLost() {
     _socket = null;
     realtime = false;
+    // Sans canal, on n'apprendra plus qu'un correspondant s'est déconnecté :
+    // mieux vaut ne rien afficher qu'afficher une présence périmée.
+    _enLigne.clear();
+    _abonnementPresence = {};
     notifyListeners();
     Future<void>.delayed(const Duration(seconds: 3), () {
       if (_api != null && _socket == null) _connectRealtime();
     });
   }
 
-  /// Traite un signal éphémère reçu (indicateur d'écriture).
+  /// Traite un signal éphémère reçu (indicateur d'écriture, présence).
   void _traiterSignalEphemere(String brut) {
     try {
       final json = jsonDecode(brut) as Map<String, dynamic>;
       final type = json['type'] as String?;
+
+      if (type == 'presence.snapshot') {
+        // L'instantané fait autorité : il remplace ce qu'on croyait savoir,
+        // sinon un appareil déconnecté pendant une coupure resterait allumé.
+        _enLigne
+          ..clear()
+          ..addAll((json['online'] as List<dynamic>? ?? const [])
+              .whereType<String>());
+        notifyListeners();
+        return;
+      }
+      if (type == 'presence') {
+        final device = json['device'] as String?;
+        if (device == null) return;
+        if (json['state'] == 'online') {
+          _enLigne.add(device);
+        } else {
+          _enLigne.remove(device);
+        }
+        notifyListeners();
+        return;
+      }
+
       final convId = json['conversationId'] as String?;
       if (convId == null) return;
 
@@ -2373,6 +2492,9 @@ class ChatService extends ChangeNotifier {
             }
             conv.sessions[sender] = await gateway.acceptSession(unpacked.handshake!);
             conv.targetDeviceIds.add(sender);
+            // Côté répondeur aussi : c'est ici qu'on découvre l'appareil d'en
+            // face, donc ici qu'on peut commencer à observer sa présence.
+            _rafraichirAbonnementPresence();
           }
           final sessionId = conv.sessions[sender];
           if (sessionId == null) continue;

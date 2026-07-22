@@ -463,18 +463,33 @@ class _ChatScreenState extends State<ChatScreen> {
                     final c = convs[i];
                     final selected = c.id == s.activeConversationId;
                     final last = c.lastMessage;
+                    // Avatar dérivé de la clé d'identité : si la clé change,
+                    // l'apparence change. Indice visuel qui double la
+                    // bannière d'alerte, pour qui ne lit pas les bannières.
+                    final avatar = IdentityAvatar(
+                      label: c.peerUsername,
+                      identityKey: _cleDuPair(c),
+                      isGroup: c.isGroup,
+                      photo: s.photoDe(c.peerUserId),
+                    );
                     return ListTile(
                       selected: selected,
                       selectedTileColor: theme.colorScheme.surfaceContainerHighest,
-                      // Avatar dérivé de la clé d'identité : si la clé change,
-                      // l'apparence change. Indice visuel qui double la
-                      // bannière d'alerte, pour qui ne lit pas les bannières.
-                      leading: IdentityAvatar(
-                        label: c.peerUsername,
-                        identityKey: _cleDuPair(c),
-                        isGroup: c.isGroup,
-                        photo: s.photoDe(c.peerUserId),
-                      ),
+                      leading: c.isGroup || !s.enLigneDans(c.id)
+                          ? avatar
+                          : Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                avatar,
+                                Positioned(
+                                  right: -1,
+                                  bottom: -1,
+                                  child: _pastilleEnLigne(theme,
+                                      taille: 13,
+                                      bordure: theme.colorScheme.surface),
+                                ),
+                              ],
+                            ),
                       title: Text(c.peerUsername,
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(
@@ -653,6 +668,24 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Pastille « en ligne ».
+  ///
+  /// À l'accent du thème plutôt qu'au vert convenu : le vert de disponibilité
+  /// vient des messageries d'entreprise, et l'accent cyan reste lisible sur les
+  /// deux modes sans introduire une couleur qui n'appartient à rien d'autre.
+  Widget _pastilleEnLigne(ThemeData theme, {double taille = 10, Color? bordure}) =>
+      Container(
+        width: taille,
+        height: taille,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary,
+          shape: BoxShape.circle,
+          border: bordure == null ? null : Border.all(color: bordure, width: 2),
+          boxShadow: ZiaTheme.glow(theme.colorScheme.primary,
+              opacity: 0.55, blur: 6),
+        ),
+      );
+
   Widget _conversationTitle(ThemeData theme, ChatService s) {
     final conv = s.active!;
     // Un contact est « vérifié » seulement si TOUS ses appareils connus le
@@ -678,7 +711,21 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(conv.peerUsername),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                  child: Text(conv.peerUsername,
+                      maxLines: 1, overflow: TextOverflow.ellipsis)),
+              // Présence : une pastille, sans « vu à telle heure ». L'horaire
+              // de dernière connexion dit quand on dort et quand on travaille —
+              // le projet n'a aucune raison de le reconstituer.
+              if (!conv.isGroup && s.enLigneDans(conv.id)) ...[
+                const SizedBox(width: 8),
+                _pastilleEnLigne(theme, taille: 8),
+              ],
+            ],
+          ),
           Row(
             children: [
               Icon(verified ? Icons.verified_user_rounded : Icons.lock_rounded,

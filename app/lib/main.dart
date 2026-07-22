@@ -82,6 +82,7 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> with WidgetsBindingObserver
     // n'auraient d'effet qu'après un changement manuel.
     _service.indicateurEcritureActif = _settings.indicateurEcriture;
     _service.accusesLectureActifs = _settings.accusesLecture;
+    _service.partagePresenceActif = _settings.partagePresence;
   }
 
   @override

@@ -11,14 +11,15 @@ import 'app_storage.dart';
 /// propres à cet appareil. Les secrets restent dans le coffre chiffré du moteur.
 class AppSettings extends ChangeNotifier {
   AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu,
-      this._indicateurEcriture, this._accusesLecture, this._versionEcartee,
-      this._delaiVerrouillage, this._protectionEcran);
+      this._indicateurEcriture, this._accusesLecture, this._partagePresence,
+      this._versionEcartee, this._delaiVerrouillage, this._protectionEcran);
 
   ThemeMode _themeMode;
   bool _enterToSend;
   bool _onboardingVu;
   bool _indicateurEcriture;
   bool _accusesLecture;
+  bool _partagePresence;
   String? _versionEcartee;
   int _delaiVerrouillage;
   bool _protectionEcran;
@@ -38,6 +39,14 @@ class AppSettings extends ChangeNotifier {
   /// DÉSACTIVÉ par défaut. Un accusé de lecture révèle quand on ouvre un
   /// message — une information que personne ne doit donner sans l'avoir choisi.
   bool get accusesLecture => _accusesLecture;
+
+  /// Apparaître « en ligne » auprès de ses correspondants.
+  ///
+  /// DÉSACTIVÉ par défaut, pour la même raison que les accusés de lecture :
+  /// l'heure à laquelle on ouvre l'application dit quand on dort et quand on
+  /// travaille. On peut voir les autres sans se montrer — la réciprocité
+  /// imposée ailleurs est une convention, pas une protection.
+  bool get partagePresence => _partagePresence;
 
   /// Secondes d'absence avant que l'application se reverrouille.
   ///
@@ -72,12 +81,14 @@ class AppSettings extends ChangeNotifier {
     bool onboardingVu = true,
     bool indicateurEcriture = true,
     bool accusesLecture = false,
+    bool partagePresence = false,
     String? versionEcartee,
     int delaiVerrouillage = 60,
     bool protectionEcran = true,
   }) =>
       AppSettings._(themeMode, enterToSend, onboardingVu, indicateurEcriture,
-          accusesLecture, versionEcartee, delaiVerrouillage, protectionEcran);
+          accusesLecture, partagePresence, versionEcartee, delaiVerrouillage,
+          protectionEcran);
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
@@ -94,6 +105,7 @@ class AppSettings extends ChangeNotifier {
           json['onboardingVu'] as bool? ?? false,
           json['indicateurEcriture'] as bool? ?? true,
           json['accusesLecture'] as bool? ?? false,
+          json['partagePresence'] as bool? ?? false,
           json['versionEcartee'] as String?,
           (json['delaiVerrouillage'] as num?)?.toInt() ?? 60,
           json['protectionEcran'] as bool? ?? true,
@@ -103,7 +115,7 @@ class AppSettings extends ChangeNotifier {
       // on retombe sur les valeurs par défaut
     }
     return AppSettings._(
-        ThemeMode.system, true, false, true, false, null, 60, true);
+        ThemeMode.system, true, false, true, false, false, null, 60, true);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -130,6 +142,13 @@ class AppSettings extends ChangeNotifier {
   void setAccusesLecture(bool v) {
     if (v == _accusesLecture) return;
     _accusesLecture = v;
+    _save();
+    notifyListeners();
+  }
+
+  void setPartagePresence(bool v) {
+    if (v == _partagePresence) return;
+    _partagePresence = v;
     _save();
     notifyListeners();
   }
@@ -172,6 +191,7 @@ class AppSettings extends ChangeNotifier {
         'onboardingVu': _onboardingVu,
         'indicateurEcriture': _indicateurEcriture,
         'accusesLecture': _accusesLecture,
+        'partagePresence': _partagePresence,
         'versionEcartee': _versionEcartee,
         'delaiVerrouillage': _delaiVerrouillage,
         'protectionEcran': _protectionEcran,

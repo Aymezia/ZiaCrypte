@@ -252,6 +252,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       'Chiffrés : le serveur ne sait pas que tu as ouvert un '
                       'message. Désactivés par défaut'),
                 ),
+                SwitchListTile(
+                  value: widget.settings.partagePresence,
+                  onChanged: (v) {
+                    widget.settings.setPartagePresence(v);
+                    widget.service.partagePresenceActif = v;
+                  },
+                  title: const Text('Apparaître en ligne'),
+                  subtitle: const Text(
+                      'Seuls tes correspondants le voient. Tu continues de les '
+                      'voir même sans partager. Désactivé par défaut'),
+                ),
               ],
             ),
           ),

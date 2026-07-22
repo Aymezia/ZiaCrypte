@@ -26,15 +26,30 @@ if ! command -v flutter >/dev/null 2>&1; then
 fi
 export PATH
 
+# Port déjà pris : on s'arrête ici.
+#
+# Sans ce contrôle, le nôtre échoue à se lier, l'attente de démarrage réussit
+# quand même — l'autre répond exactement pareil — et le test s'exécute contre
+# un serveur ÉTRANGER, souvent une version antérieure. On cherche alors une
+# panne dans du code qui n'a pas tourné. C'est arrivé.
+if ss -ltn 2>/dev/null | grep -q ":$PORT[[:space:]]"; then
+  echo "port $PORT déjà utilisé — arrête le serveur d'essai resté ouvert"
+  echo "(ss -ltnp | grep :$PORT pour le retrouver)"
+  exit 1
+fi
+
 echo ">> Démarrage d'un serveur d'essai sur le port $PORT"
 (
   cd "$ROOT/server"
+  # exec : le sous-shell DEVIENT node, donc $! est bien le serveur. Sans cela,
+  # le piège de sortie ne tuait que le sous-shell et laissait node orphelin,
+  # tenant le port jusqu'au prochain lancement.
   PORT="$PORT" \
   RATE_LIMIT_GLOBAL_MAX=100000 \
   RATE_LIMIT_REGISTER_MAX=100000 \
   RATE_LIMIT_PASSWORD_MAX=100000 \
   RATE_LIMIT_MESSAGE_MAX=100000 \
-  node dist/index.js
+  exec node dist/index.js
 ) >/tmp/zia-test-server.log 2>&1 &
 SERVEUR=$!
 trap 'kill $SERVEUR 2>/dev/null' EXIT
@@ -45,6 +60,11 @@ for _ in $(seq 1 40); do
           -H 'content-type: application/json' -d '{}' 2>/dev/null || true)
   [ "$code" = "401" ] && break
 done
+if ! kill -0 "$SERVEUR" 2>/dev/null; then
+  echo "le serveur d'essai s'est arrêté — voir /tmp/zia-test-server.log"
+  tail -20 /tmp/zia-test-server.log
+  exit 1
+fi
 if [ "${code:-}" != "401" ]; then
   echo "le serveur d'essai n'a pas démarré — voir /tmp/zia-test-server.log"
   tail -20 /tmp/zia-test-server.log
@@ -56,7 +76,13 @@ export XDG_RUNTIME_DIR="$(mktemp -d)"
 export XDG_DATA_HOME="$(mktemp -d)"
 export ZIA_CRYPTO_LIB="$LIB"
 cd "$ROOT/app"
-exec dbus-run-session -- bash -c \
+# Surtout PAS `exec` ici : il remplacerait ce shell, le piège de sortie ne
+# s'exécuterait jamais, et le serveur d'essai survivrait à chaque lancement —
+# tenant le port et faisant tester la fois suivante contre la version d'avant.
+dbus-run-session -- bash -c \
   'echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
    flutter test --dart-define=ZIA_TEST_SERVER=http://127.0.0.1:'"$PORT"' \
-     test/groupe_integration_test.dart'
+     test/groupe_integration_test.dart test/presence_integration_test.dart'
+CODE=$?
+kill "$SERVEUR" 2>/dev/null
+exit $CODE
