@@ -29,26 +29,36 @@ OUTIL="$ROOT/crypto-engine/build/linux-system/tools/zia_sign_release"
 }
 [ -d "$DOSSIER" ] || { echo "ERREUR : dossier introuvable ($DOSSIER)." >&2; exit 2; }
 
-# Si la clé est chiffrée, l'outil demande la phrase À CHAQUE artefact : il est
-# relancé une fois par fichier. C'est volontairement laissé tel quel — retenir
-# la phrase entre deux appels supposerait de la garder en mémoire ou de la
-# passer en argument, où elle serait lisible par tout autre processus.
+# Tous les artefacts sont signés en UN SEUL appel à l'outil : si la clé est
+# chiffrée, la phrase de passe n'est donc demandée qu'une fois. Un appel par
+# fichier la redemandait à chaque tour — une corvée qui ne protégeait rien,
+# puisque la phrase réside de toute façon en mémoire le temps de dériver la clé.
 echo ">> Signature des artefacts de $DOSSIER"
-signes=0
+fichiers=()
 for f in "$DOSSIER"/*; do
-  # On ne signe pas les signatures elles-mêmes.
-  case "$f" in *.sig) continue;; esac
+  case "$f" in *.sig) continue;; esac  # on ne signe pas les signatures
   [ -f "$f" ] || continue
-  "$OUTIL" sign "$CLE" "$f" >/dev/null
-  # Contrôle immédiat : une signature qu'on ne vérifie pas soi-même ne prouve
-  # rien — autant s'assurer tout de suite qu'elle est utilisable.
-  PUB="${CLE%.key}.pub"
-  if [ -f "$PUB" ] && ! "$OUTIL" verify "$PUB" "$f" "$f.sig" >/dev/null; then
-    echo "ERREUR : la signature de $(basename "$f") ne se vérifie pas." >&2
-    exit 1
-  fi
-  echo "   $(basename "$f").sig"
-  signes=$((signes + 1))
+  fichiers+=("$f")
 done
 
-echo ">> $signes artefact(s) signé(s) et vérifié(s)"
+if [ ${#fichiers[@]} -eq 0 ]; then
+  echo "ERREUR : aucun artefact à signer dans $DOSSIER." >&2
+  exit 1
+fi
+
+"$OUTIL" sign "$CLE" "${fichiers[@]}"
+
+# Contrôle immédiat : une signature qu'on ne vérifie pas soi-même ne prouve
+# rien. On revérifie chaque `.sig` produit, avec la clé publique.
+PUB="${CLE%.key}.pub"
+if [ -f "$PUB" ]; then
+  for f in "${fichiers[@]}"; do
+    if ! "$OUTIL" verify "$PUB" "$f" "$f.sig" >/dev/null; then
+      echo "ERREUR : la signature de $(basename "$f") ne se vérifie pas." >&2
+      exit 1
+    fi
+    echo "   $(basename "$f").sig  vérifié"
+  done
+fi
+
+echo ">> ${#fichiers[@]} artefact(s) signé(s) et vérifié(s)"
