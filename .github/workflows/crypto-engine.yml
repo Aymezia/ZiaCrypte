@@ -73,7 +73,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm cmake ninja-build libsodium-dev libsecret-1-dev
+          sudo apt-get install -y clang llvm cmake ninja-build libsodium-dev libsecret-1-dev \
+                                  gnome-keyring dbus-x11
 
       # liboqs (ML-KEM-768, PQXDH) : aucune distribution ne l'empaquette
       # encore. Compilé ici en version épinglée, ML-KEM seul, et SANS OpenSSL —
@@ -90,17 +91,24 @@ jobs:
                 -DBUILD_SHARED_LIBS=OFF
           sudo cmake --build /tmp/liboqs/build --target install
 
-      # Aucun service de trousseau n'existe sur un runner. Le moteur doit
-      # échouer franchement plutôt que d'attendre indéfiniment — un délai court
-      # rend le défaut visible ici s'il revenait.
+      # Un runner n'a pas de service de trousseau, et deux suites en ont besoin
+      # (persistance de session, identité chiffrée at-rest). On en démarre un,
+      # comme dans le job précédent.
+      #
+      # Ces deux suites échouaient déjà ici : NDEBUG effaçait leurs assert(),
+      # elles passaient donc pour vertes sans rien vérifier. Le délai court
+      # reste utile — si le trousseau venait à manquer, le moteur doit échouer
+      # franchement plutôt qu'attendre indéfiniment.
       - name: Build + test sous ASan/UBSan
         env:
-          ZIA_KEYSTORE_TIMEOUT_SECONDS: 2
+          ZIA_KEYSTORE_TIMEOUT_SECONDS: 5
         run: |
           cd crypto-engine
           cmake --preset linux-sanitizers
           cmake --build build/linux-sanitizers -j"$(nproc)"
-          ctest --test-dir build/linux-sanitizers --output-on-failure
+          dbus-run-session -- bash -c \
+            'echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
+             ctest --test-dir build/linux-sanitizers --output-on-failure'
 
       - name: Fuzzing (budget court)
         env:
