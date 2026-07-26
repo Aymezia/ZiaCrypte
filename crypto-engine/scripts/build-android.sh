@@ -117,7 +117,7 @@ for abi in "${ABIS[@]}"; do
     "$ROOT/src/primitives/primitives.cpp" \
     "$ROOT/src/storage/identity_store.cpp" "$ROOT/src/storage/secure_blob.cpp" \
     "$ROOT/src/vault.cpp" "$ROOT/src/attachment.cpp" \
-    "$ROOT/src/safety_number.cpp" "$ROOT/src/release_signature.cpp" "$ROOT/src/backup.cpp" "$ROOT/src/applock.cpp" "$ROOT/src/sealed_sender.cpp" "$ROOT/src/sender_keys.cpp" \
+    "$ROOT/src/safety_number.cpp" "$ROOT/src/release_signature.cpp" "$ROOT/src/backup.cpp" "$ROOT/src/applock.cpp" "$ROOT/src/sealed_sender.cpp" "$ROOT/src/sender_keys.cpp" "$ROOT/src/channel.cpp" \
     "$ROOT/platform/android/secure_key_store_android.cpp" \
     -o "$out_dir/libzia_crypto.so" \
     "$sodium_prefix/lib/libsodium.a" "$oqs_prefix/lib/liboqs.a" -llog

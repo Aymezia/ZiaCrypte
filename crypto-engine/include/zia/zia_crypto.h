@@ -291,6 +291,32 @@ ZIA_API ZiaStatus zia_sender_key_decrypt(ZiaEngine* engine, const char* group_id
                                          const uint8_t* message, size_t message_len,
                                          uint8_t** out, size_t* out_len);
 
+/* ================= Canaux de diffusion ================= */
+/* Longueur du secret de lien : une clé symétrique de 256 bits, celle qui voyage
+ * dans le lien d'invitation après le « # » et n'atteint JAMAIS le serveur. */
+#define ZIA_CHANNEL_LINK_SECRET_LEN 32
+
+/* Scelle un message de distribution de clé d'expéditeur (obtenu par
+ * zia_sender_key_create) sous une clé dérivée du secret du lien.
+ *
+ * C'est ce qui rend un canal chiffré ET ouvert : le blob scellé peut reposer
+ * sur le serveur, qui ne peut pas l'ouvrir, tandis que quiconque détient le
+ * lien — donc le secret — le déscelle et obtient de quoi LIRE le canal (pas d'y
+ * publier : la distribution ne contient jamais la clé de signature privée).
+ *
+ * Dérivation : XChaCha20-Poly1305 sous HKDF-SHA256(link_secret). Nonce aléatoire
+ * préfixé, pour qu'une rotation re-scellée sous le même secret reste sûre. */
+ZIA_API ZiaStatus zia_channel_seal_key(const uint8_t link_secret[ZIA_CHANNEL_LINK_SECRET_LEN],
+                                       const uint8_t* distribution, size_t distribution_len,
+                                       uint8_t** out_sealed, size_t* out_len);
+
+/* Opération inverse : déscelle avec le secret du lien. Un secret erroné, ou un
+ * blob altéré, échoue en ZIA_ERR_CRYPTO_FAILURE — jamais un déscellement
+ * partiel. Le résultat se passe ensuite à zia_sender_key_process. */
+ZIA_API ZiaStatus zia_channel_open_key(const uint8_t link_secret[ZIA_CHANNEL_LINK_SECRET_LEN],
+                                       const uint8_t* sealed, size_t sealed_len,
+                                       uint8_t** out_distribution, size_t* out_len);
+
 ZIA_API ZiaStatus zia_session_serialize(ZiaSession* session, uint8_t** out, size_t* out_len);
 ZIA_API ZiaStatus zia_session_deserialize(ZiaEngine* engine, const uint8_t* data, size_t len,
                                          ZiaSession** out_session);

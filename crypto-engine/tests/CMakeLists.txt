@@ -66,6 +66,13 @@ add_executable(zia_sender_keys_test sender_keys_test.cpp)
 target_link_libraries(zia_sender_keys_test PRIVATE zia_crypto)
 add_test(NAME sender_keys COMMAND zia_sender_keys_test)
 
+# Canaux : le lien porte la clé de lecture. Prouve le scellement/descellement
+# sous le secret de lien, la lecture de bout en bout, et le refus de publier
+# sans la clé de signature de l'admin.
+add_executable(zia_channel_test channel_test.cpp)
+target_link_libraries(zia_channel_test PRIVATE zia_crypto)
+add_test(NAME channel COMMAND zia_channel_test)
+
 # ------------------------------------------------------------------ NDEBUG
 #
 # Toute cette suite est écrite avec assert(). Or les presets compilent en
@@ -83,7 +90,8 @@ set(ZIA_TEST_TARGETS
     zia_identity_migration_test
     zia_backup_test
     zia_sealed_sender_test
-    zia_sender_keys_test)
+    zia_sender_keys_test
+    zia_channel_test)
 foreach(cible IN LISTS ZIA_TEST_TARGETS)
     if(MSVC)
         target_compile_options(${cible} PRIVATE /UNDEBUG)

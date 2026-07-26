@@ -14,6 +14,7 @@ add_library(zia_crypto SHARED
     applock.cpp
     sealed_sender.cpp
     sender_keys.cpp
+    channel.cpp
     release_signature.cpp
 )
 
