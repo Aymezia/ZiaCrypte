@@ -498,6 +498,12 @@ class ChatService extends ChangeNotifier {
     String user,
   ) async {
     api.accessToken = res['accessToken'] as String;
+    // Sans le refresh token, le jeton d'accès expirait au bout de 15 min et
+    // l'application se retrouvait « déconnectée ». On le confie au client, qui
+    // renouvelle tout seul sur 401. Le WebSocket, lui, reste valide après
+    // expiration (le serveur ne vérifie le jeton qu'à la poignée de main) et
+    // toute reconnexion ultérieure relira le jeton frais — rien à forcer.
+    api.refreshToken = res['refreshToken'] as String?;
     _api = api;
     _gateway = gateway;
     username = user;

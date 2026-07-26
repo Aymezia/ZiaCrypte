@@ -12,12 +12,27 @@ class ApiClient {
           baseUrl: baseUrl,
           connectTimeout: const Duration(seconds: 10),
           receiveTimeout: const Duration(seconds: 15),
-        ));
+        )) {
+    // Rafraîchissement automatique du jeton d'accès sur 401. Sans lui, le jeton
+    // (15 min) expirait et l'application paraissait « déconnectée » : toutes
+    // les requêtes échouaient alors qu'une session valide existait encore.
+    _dio.interceptors.add(InterceptorsWrapper(onError: _surErreur));
+  }
 
   /// Racine de l'API, réutilisée pour construire l'URL du WebSocket.
   final String baseUrl;
   final Dio _dio;
   String? _accessToken;
+
+  /// Jeton de renouvellement (longue durée). Permet de reprendre un nouveau
+  /// jeton d'accès sans redemander le mot de passe. En mémoire seulement.
+  String? refreshToken;
+
+  /// Appelé après un renouvellement réussi des jetons : laisse le reste de
+  /// l'application réagir (reconnecter le WebSocket avec le jeton frais).
+  void Function()? onTokensRenewed;
+
+  Future<void>? _renouvellementEnCours;
 
   set accessToken(String? token) {
     _accessToken = token;
@@ -25,6 +40,62 @@ class ApiClient {
   }
 
   String? get accessToken => _accessToken;
+
+  /// Intercepte les 401 pour tenter un renouvellement puis rejouer la requête.
+  Future<void> _surErreur(
+      DioException e, ErrorInterceptorHandler handler) async {
+    final req = e.requestOptions;
+    final estExpire = e.response?.statusCode == 401;
+    // On ne tente rien si : ce n'est pas un 401 ; pas de refresh token ; la
+    // requête a DÉJÀ été rejouée (évite la boucle) ; ou c'est l'appel de
+    // renouvellement lui-même. Une révocation (device_revoked) échouera au
+    // renouvellement et retombera sur le 401 d'origine — le comportement voulu.
+    if (!estExpire ||
+        refreshToken == null ||
+        req.extra['zia_retried'] == true ||
+        req.path.contains('/auth/refresh')) {
+      return handler.next(e);
+    }
+
+    try {
+      await _renouveler();
+    } catch (_) {
+      return handler.next(e); // renouvellement raté : on remonte le 401 d'origine
+    }
+
+    req.extra['zia_retried'] = true;
+    req.headers['Authorization'] = 'Bearer $_accessToken';
+    try {
+      handler.resolve(await _dio.fetch<dynamic>(req));
+    } on DioException catch (e2) {
+      handler.next(e2);
+    }
+  }
+
+  /// Un seul renouvellement à la fois : plusieurs requêtes qui expirent
+  /// ensemble le partagent au lieu d'en déclencher un chacune (ce qui ferait
+  /// tourner le refresh token en course et invaliderait les autres).
+  Future<void> _renouveler() {
+    final enCours = _renouvellementEnCours;
+    if (enCours != null) return enCours;
+    final f = _faireRenouvellement();
+    _renouvellementEnCours = f;
+    f.whenComplete(() => _renouvellementEnCours = null);
+    return f;
+  }
+
+  Future<void> _faireRenouvellement() async {
+    final rt = refreshToken;
+    if (rt == null) throw StateError('pas de refresh token');
+    // Un Dio neuf, sans l'intercepteur : le renouvellement ne doit pas pouvoir
+    // se re-déclencher lui-même.
+    final brut = Dio(BaseOptions(baseUrl: baseUrl));
+    final res = await brut.post<Map<String, dynamic>>(
+        '/v1/auth/refresh', data: {'refreshToken': rt});
+    accessToken = res.data!['accessToken'] as String;
+    refreshToken = res.data!['refreshToken'] as String?;
+    onTokensRenewed?.call();
+  }
 
   Future<Map<String, dynamic>> register({
     required String username,

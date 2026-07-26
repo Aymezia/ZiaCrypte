@@ -82,7 +82,7 @@ cd "$ROOT/app"
 dbus-run-session -- bash -c \
   'echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
    flutter test --dart-define=ZIA_TEST_SERVER=http://127.0.0.1:'"$PORT"' \
-     test/groupe_integration_test.dart test/statuts_integration_test.dart test/canal_integration_test.dart test/envoi_echec_integration_test.dart'
+     test/groupe_integration_test.dart test/statuts_integration_test.dart test/canal_integration_test.dart test/envoi_echec_integration_test.dart test/refresh_token_integration_test.dart'
 CODE=$?
 kill "$SERVEUR" 2>/dev/null
 exit $CODE
