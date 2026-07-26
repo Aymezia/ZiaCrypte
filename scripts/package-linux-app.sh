@@ -24,18 +24,31 @@ echo ">> Compilation du moteur (libsodium statique)"
 SODIUM_A="$(pkg-config --variable=libdir libsodium 2>/dev/null || echo /usr/lib/x86_64-linux-gnu)/libsodium.a"
 [ -f "$SODIUM_A" ] || { echo "libsodium.a introuvable — installe libsodium-dev"; exit 1; }
 
+# liboqs (ML-KEM-768, PQXDH) : aucune distribution ne l'empaquette, on utilise
+# l'installation locale (voir README / crypto-engine.yml). Lié STATIQUEMENT pour
+# que le bundle reste autonome — un .so avec des symboles OQS non résolus
+# planterait au chargement sur la machine cible, comme le fit Android sans son
+# runtime C++.
+OQS_A="$(pkg-config --variable=libdir liboqs 2>/dev/null || echo /usr/local/lib)/liboqs.a"
+[ -f "$OQS_A" ] || OQS_A="/usr/local/lib/liboqs.a"
+[ -f "$OQS_A" ] || { echo "liboqs.a introuvable — compile-le (cf. README, section moteur)"; exit 1; }
+OQS_INC="$(dirname "$OQS_A")/../include"
+
 TMP_SO="$(mktemp -d)/libzia_crypto.so"
+# --no-undefined : le lien ÉCHOUE si un symbole reste non résolu, au lieu de
+# produire un .so qui plante au dlopen chez l'utilisateur. C'est ce qui aurait
+# attrapé au build l'absence de liboqs, plutôt qu'à l'exécution.
 g++ -std=c++20 -O2 -DNDEBUG -fPIC -shared \
-  -I"$ENGINE/include" -I"$ENGINE/src" $(pkg-config --cflags libsecret-1) \
+  -I"$ENGINE/include" -I"$ENGINE/src" -I"$OQS_INC" $(pkg-config --cflags libsecret-1) \
   "$ENGINE/src/engine.cpp" "$ENGINE/src/identity.cpp" "$ENGINE/src/x3dh.cpp" \
   "$ENGINE/src/ratchet.cpp" "$ENGINE/src/session.cpp" \
   "$ENGINE/src/primitives/primitives.cpp" \
   "$ENGINE/src/storage/identity_store.cpp" \
   "$ENGINE/src/storage/secure_blob.cpp" "$ENGINE/src/vault.cpp" \
-  "$ENGINE/src/attachment.cpp" "$ENGINE/src/safety_number.cpp" "$ENGINE/src/release_signature.cpp" "$ENGINE/src/backup.cpp" "$ENGINE/src/applock.cpp" "$ENGINE/src/sealed_sender.cpp" "$ENGINE/src/sender_keys.cpp" \
+  "$ENGINE/src/attachment.cpp" "$ENGINE/src/safety_number.cpp" "$ENGINE/src/release_signature.cpp" "$ENGINE/src/backup.cpp" "$ENGINE/src/applock.cpp" "$ENGINE/src/sealed_sender.cpp" "$ENGINE/src/sender_keys.cpp" "$ENGINE/src/channel.cpp" \
   "$ENGINE/platform/linux/secure_key_store_linux.cpp" \
   -o "$TMP_SO" \
-  -Wl,--exclude-libs,ALL "$SODIUM_A" $(pkg-config --libs libsecret-1)
+  -Wl,--no-undefined -Wl,--exclude-libs,ALL "$SODIUM_A" "$OQS_A" $(pkg-config --libs libsecret-1)
 
 # Garde-fou : toute fonction déclarée dans l'en-tête public DOIT être exportée
 # par la bibliothèque. La liste de sources ci-dessus est maintenue à la main ;
