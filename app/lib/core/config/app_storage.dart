@@ -10,19 +10,48 @@ class AppStorage {
   const AppStorage._();
 
   /// Répertoire de données de l'application, conforme aux usages de chaque OS.
+  ///
+  /// Le repli ne doit JAMAIS produire un chemin relatif : `HOME` absent donnait
+  /// autrefois `./.local/share`, dont la création échoue si le répertoire
+  /// courant est en lecture seule (montage, service sans HOME). En dernier
+  /// recours on prend donc le dossier temporaire système, toujours absolu et
+  /// inscriptible — les données n'y survivent pas forcément à un redémarrage,
+  /// mais l'application démarre au lieu de planter.
   static Directory get dataDirectory {
-    String base;
     if (Platform.isWindows) {
-      base = Platform.environment['APPDATA'] ??
-          '${Platform.environment['USERPROFILE']}\\AppData\\Roaming';
-      return Directory('$base\\ZiaCrypte');
+      final base = _premierNonVide([
+        Platform.environment['APPDATA'],
+        () {
+          final up = Platform.environment['USERPROFILE'];
+          return (up != null && up.isNotEmpty) ? '$up\\AppData\\Roaming' : null;
+        }(),
+      ]);
+      return Directory('${base ?? Directory.systemTemp.path}\\ZiaCrypte');
     }
-    final home = Platform.environment['HOME'] ?? '.';
+
+    final home = Platform.environment['HOME'];
+    final hasHome = home != null && home.isNotEmpty;
+
     if (Platform.isMacOS) {
-      return Directory('$home/Library/Application Support/ZiaCrypte');
+      final base =
+          hasHome ? '$home/Library/Application Support' : Directory.systemTemp.path;
+      return Directory('$base/ZiaCrypte');
     }
-    base = Platform.environment['XDG_DATA_HOME'] ?? '$home/.local/share';
+
+    final base = _premierNonVide([
+          Platform.environment['XDG_DATA_HOME'],
+          hasHome ? '$home/.local/share' : null,
+        ]) ??
+        Directory.systemTemp.path;
     return Directory('$base/ZiaCrypte');
+  }
+
+  /// Première valeur non nulle et non vide d'une liste, ou null.
+  static String? _premierNonVide(List<String?> valeurs) {
+    for (final v in valeurs) {
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return null;
   }
 
   /// Dossier confié au moteur natif pour un compte donné.
