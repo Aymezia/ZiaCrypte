@@ -1228,7 +1228,10 @@ class _ChatScreenState extends State<ChatScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _bulle(theme, m, memeAuteurAvant, memeAuteurApres),
-                      if (finDeGroupe) _piedDeMessage(theme, m),
+                      // Le pied porte l'heure et l'état ; on le montre en fin de
+                      // groupe, ou toujours pour un échec — un « réessayer »
+                      // enfoui au milieu d'une salve ne se verrait pas.
+                      if (finDeGroupe || m.sendFailed) _piedDeMessage(theme, m),
                     ],
                   ),
                 ),
@@ -1409,6 +1412,31 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Heure et statut de remise, sous le dernier message d'un groupe.
   Widget _piedDeMessage(ThemeData theme, ChatMessage m) {
     final couleur = theme.colorScheme.onSurfaceVariant;
+
+    // Envoi raté : on le dit, et on propose de réessayer d'un tap. Un message
+    // qui a échoué ne doit ni disparaître, ni se faire passer pour envoyé.
+    if (m.sendFailed) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 3, left: 8, right: 8),
+        child: InkWell(
+          onTap: () => widget.service.renvoyer(m),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline,
+                  size: 13, color: theme.colorScheme.error),
+              const SizedBox(width: 4),
+              Text('Non envoyé · réessayer',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: theme.colorScheme.error,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.only(top: 3, left: 8, right: 8),
       child: Row(

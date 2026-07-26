@@ -2289,6 +2289,25 @@ class ChatService extends ChangeNotifier {
 
   Future<void> send(String text) => _sendPayload(text, null);
 
+  /// Réémet un message dont l'envoi avait totalement échoué. On retire la bulle
+  /// ratée et on relance l'envoi de son contenu : en cas de nouveau succès,
+  /// elle réapparaît en état normal ; en cas de nouvel échec, de nouveau ratée.
+  Future<void> renvoyer(ChatMessage m) async {
+    if (!m.sendFailed) return;
+    Conversation? conv;
+    for (final c in _conversations.values) {
+      if (c.messages.contains(m)) {
+        conv = c;
+        break;
+      }
+    }
+    if (conv == null) return;
+    conv.messages.remove(m);
+    activeConversationId = conv.id; // _sendPayload agit sur la conversation active
+    notifyListeners();
+    await _sendPayload(m.text, m.attachment);
+  }
+
   /// Chiffre et diffuse un contenu vers tous les appareils de la conversation.
   Future<void> _sendPayload(String text, AttachmentRef? attachment) async {
     final conv = active;
@@ -2356,40 +2375,48 @@ class ChatService extends ChangeNotifier {
           error = 'Un appareil n’a pas reçu le message : ${_humanize(e)}';
         }
       }
-      if (delivered == 0) {
+      // Échec total : aucun appareil n'a reçu. On n'abandonne plus en silence
+      // — le message disparaissait alors du fil, laissant croire qu'il était
+      // parti. Il reste affiché, marqué en échec, avec un « réessayer ».
+      final echec = delivered == 0;
+
+      // Une annonce interne (nom de groupe) n'est pas un message : elle ne
+      // s'affiche pas, même ratée — elle sera renvoyée par le mécanisme normal.
+      if (_estAnnonceInterne(text)) {
+        if (replyingTo != null) replyingTo = null;
         notifyListeners();
         return;
       }
 
-      // Les annonces internes (nom de groupe) ne sont pas des messages : elles
-      // ne s'affichent ni chez l'expéditeur, ni chez les destinataires. Seule
-      // la réception les filtrait, si bien que l'auteur du groupe voyait passer
-      // un marqueur technique dans sa propre conversation.
-      if (!_estAnnonceInterne(text)) {
-        conv.messages.add(ChatMessage(
-          text: text,
-          mine: true,
-          at: DateTime.now(),
-          expiresAt: _echeance(conv),
-          id: messageId,
-          replyToId: citation?.id,
-          replyToText: citation == null
-              ? null
-              : (citation.text.length > 160
-                  ? '${citation.text.substring(0, 160)}…'
-                  : citation.text),
-          replyToMine: citation?.mine,
-          attachment: attachment,
-          pendingReceiptIds: receiptIds,
-        ));
-      }
-      // La citation est consommée, qu'il s'agisse d'un message ou d'une
-      // annonce interne : on ne la reporte pas sur l'envoi suivant.
+      if (echec) error = null; // le marqueur en ligne suffit, pas de bandeau en plus
+      conv.messages.add(ChatMessage(
+        text: text,
+        mine: true,
+        at: DateTime.now(),
+        expiresAt: _echeance(conv),
+        id: messageId,
+        replyToId: citation?.id,
+        replyToText: citation == null
+            ? null
+            : (citation.text.length > 160
+                ? '${citation.text.substring(0, 160)}…'
+                : citation.text),
+        replyToMine: citation?.mine,
+        attachment: attachment,
+        pendingReceiptIds: receiptIds,
+        sendFailed: echec,
+      ));
       if (replyingTo != null) {
         replyingTo = null;
       }
       conv.lastActivity = DateTime.now();
       notifyListeners();
+
+      // En échec, on ne persiste rien : au redémarrage on repart propre, sans
+      // promettre un renvoi qu'on ne relancerait pas. Le ratchet a avancé en
+      // mémoire, mais le pair n'a rien reçu — les clés sautées couvriront
+      // l'écart au prochain envoi réussi.
+      if (echec) return;
 
       await _saveHistory(conv);
       await _saveSessions(conv); // les ratchets ont avancé

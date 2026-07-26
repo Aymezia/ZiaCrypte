@@ -21,6 +21,7 @@ class ChatMessage {
     this.systeme = false,
     this.expiresAt,
     this.author,
+    this.sendFailed = false,
   });
 
   /// Instant après lequel ce message doit disparaître, si la conversation a
@@ -41,6 +42,13 @@ class ChatMessage {
   /// directe (l'auteur est le correspondant, sans ambiguïté) et pour ses
   /// propres messages. Affiché au-dessus de la bulle, une fois par bloc.
   final String? author;
+
+  /// Envoi total échoué : aucun destinataire n'a reçu le message (réseau coupé,
+  /// serveur injoignable). Reste affiché avec un marqueur et un « réessayer »,
+  /// au lieu de disparaître en silence. Non persisté : un échec ne survit pas à
+  /// un redémarrage — au retour, on repart d'un état propre plutôt que de
+  /// promettre un renvoi qu'on ne relancera pas tout seul.
+  bool sendFailed;
 
   /// Message envoyé, confirmé lu par le correspondant (si celui-ci a activé
   /// les accusés de lecture — ils sont facultatifs des deux côtés).
