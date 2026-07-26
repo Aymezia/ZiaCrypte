@@ -479,6 +479,35 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Renouvelle la clé d'un canal : ferme l'accès à qui détient l'ancien lien
+  /// (un abonné retiré), au prix d'avoir à repartager le nouveau lien.
+  Future<void> _renouvelerCle(Conversation conv) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Renouveler la clé ?'),
+        content: const Text(
+          'Une nouvelle clé de lecture est générée. L’ancien lien cessera de '
+          'fonctionner — c’est ce qui retire vraiment quelqu’un que tu as '
+          'désabonné.\n\n'
+          'Contrepartie : tu devras partager le NOUVEAU lien à celles et ceux '
+          'qui doivent rester. Eux aussi devront le rouvrir.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Renouveler')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final lien = await widget.service.renouvelerCleCanal(conv);
+    if (lien != null && mounted) _montrerLien(lien);
+  }
+
   /// Rejoindre un canal en collant son lien.
   Future<void> _promptJoinChannel() async {
     final champ = TextEditingController();
@@ -909,6 +938,8 @@ class _ChatScreenState extends State<ChatScreen> {
           if (v == 'lien') {
             final lien = s.lienDuCanal(conv);
             if (lien != null) _montrerLien(lien);
+          } else if (v == 'renouveler') {
+            _renouvelerCle(conv);
           } else if (v == 'quitter') {
             s.quitterCanal(conv);
           }
@@ -918,6 +949,13 @@ class _ChatScreenState extends State<ChatScreen> {
             const PopupMenuItem(
               value: 'lien',
               child: ListTile(leading: Icon(Icons.link), title: Text('Partager le lien')),
+            ),
+          if (conv.channelIsAdmin)
+            const PopupMenuItem(
+              value: 'renouveler',
+              child: ListTile(
+                  leading: Icon(Icons.autorenew),
+                  title: Text('Renouveler la clé')),
             ),
           PopupMenuItem(
             value: 'quitter',
@@ -1002,11 +1040,20 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
+  /// « 0 abonné », « 1 abonné », « 3 abonnés » — accord au pluriel.
+  String _pluriel(int n, String mot) => '$n $mot${n > 1 ? 's' : ''}';
+
   Widget _conversationTitle(ThemeData theme, ChatService s) {
     final conv = s.active!;
 
     // Un canal n'a ni contact vérifié ni statut : il a un nom et un rôle.
     if (conv.isChannel) {
+      final abonnes = s.abonnesDuCanal(conv.id);
+      final role = conv.channelIsAdmin ? 'vous publiez' : 'lecture seule';
+      // Le compte d'abonnés complète le rôle dès qu'on l'a relevé.
+      final sous = abonnes == null
+          ? 'Canal · $role'
+          : 'Canal · $role · ${_pluriel(abonnes, 'abonné')}';
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1016,9 +1063,11 @@ class _ChatScreenState extends State<ChatScreen> {
             Icon(Icons.campaign_outlined,
                 size: 11, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(width: 4),
-            Text(
-              conv.channelIsAdmin ? 'Canal · vous publiez' : 'Canal · lecture seule',
-              style: theme.textTheme.bodySmall,
+            Flexible(
+              child: Text(sous,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall),
             ),
           ]),
         ],

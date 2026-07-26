@@ -122,6 +122,27 @@ void main() {
               c.messages.any((m) => !m.mine && m.text.contains('0.11'))));
       expect(lu, isTrue, reason: 'l’abonné n’a pas lu le post : ${abonne.error}');
 
+      // Renouvellement de clé : l'ancien lien doit cesser de fonctionner. C'est
+      // ce qui retire réellement un abonné — sans ça, il garde de quoi lire.
+      final nouveauLien = await admin.renouvelerCleCanal(conv);
+      expect(nouveauLien, isNotNull, reason: 'renouvellement échoué : ${admin.error}');
+      expect(nouveauLien, isNot(equals(lien)),
+          reason: 'le nouveau lien doit différer de l’ancien');
+
+      await admin.publierDansCanal('après rotation');
+      expect(conv.messages.any((m) => m.mine && m.text.contains('après rotation')),
+          isTrue);
+
+      // L'abonné reçoit toujours le blob (encore inscrit côté serveur) mais ne
+      // peut plus le DÉCHIFFRER : sa clé est périmée. Le message ne doit jamais
+      // apparaître chez lui.
+      await Future<void>.delayed(const Duration(seconds: 4));
+      final litApres = abonne.conversations
+          .expand((c) => c.messages)
+          .any((m) => m.text.contains('après rotation'));
+      expect(litApres, isFalse,
+          reason: 'après renouvellement, l’ancien lien ne doit plus déchiffrer');
+
       await admin.logout();
       await abonne.logout();
     }, timeout: const Timeout(Duration(minutes: 2)));

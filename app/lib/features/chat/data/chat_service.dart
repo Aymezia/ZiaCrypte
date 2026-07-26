@@ -552,6 +552,7 @@ class ChatService extends ChangeNotifier {
     _pendingHandshakes.clear();
     _enLigne.clear();
     _abonnementPresence = {};
+    _abonnesCanal.clear();
     statuts.clear();
     // Le jeton de remise appartient à la session qui se ferme. Le conserver
     // ferait annoncer au compte suivant celui du précédent.
@@ -669,12 +670,60 @@ class ChatService extends ChangeNotifier {
       unawaited(_saveConversations());
     }
     notifyListeners();
+    // Canal : on récupère le nombre d'abonnés pour l'en-tête. Sans conséquence
+    // s'il échoue — c'est une indication, pas une donnée dont dépend l'affichage.
+    if (conv.isChannel) unawaited(_rafraichirInfosCanal(conv.id));
     unawaited(_restoreSessions(conv).then((_) async {
       notifyListeners();
       // Ouvrir la conversation vaut lecture : on confirme, si l'utilisateur
       // l'a activé.
       await marquerLu(conv);
     }));
+  }
+
+  /// Nombre d'abonnés connus d'un canal, ou null tant qu'on ne l'a pas relevé.
+  final Map<String, int> _abonnesCanal = {};
+  int? abonnesDuCanal(String id) => _abonnesCanal[id];
+
+  Future<void> _rafraichirInfosCanal(String id) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      final info = await api.channelInfo(id);
+      _abonnesCanal[id] = (info['subscriberCount'] as num?)?.toInt() ?? 0;
+      notifyListeners();
+    } catch (_) {
+      // Indication non critique : on laisse l'ancienne valeur, ou aucune.
+    }
+  }
+
+  /// Renouvelle la clé d'un canal (admin) et renvoie le NOUVEAU lien.
+  ///
+  /// C'est le geste qui manquait pour retirer réellement un abonné : tant que
+  /// la clé ne tourne pas, un partant garde de quoi lire la suite. On crée donc
+  /// une clé d'expéditeur neuve, on la scelle sous un NOUVEAU secret de lien, et
+  /// on la dépose. L'ancien lien n'ouvre plus rien — d'où la contrepartie : il
+  /// faut redistribuer le nouveau lien à ceux qui restent. C'est inhérent au
+  /// modèle « le lien EST la clé ».
+  Future<String?> renouvelerCleCanal(Conversation conv) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return null;
+    if (!conv.isChannel || !conv.channelIsAdmin) return null;
+    _setBusy(true);
+    try {
+      final secret = _octetsAleatoires(32);
+      final distribution = await gateway.engine.senderKeyCreate(conv.id);
+      final scelle = await gateway.engine.channelSealKey(secret, distribution);
+      await api.putChannelKey(conv.id, base64Encode(scelle));
+      conv.channelLinkSecret = secret;
+      await _saveConversations();
+      _setBusy(false);
+      return _lienCanal(conv.id, secret, conv.peerUsername);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+      return null;
+    }
   }
 
   void closeConversation() {
