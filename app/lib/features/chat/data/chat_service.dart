@@ -655,6 +655,13 @@ class ChatService extends ChangeNotifier {
     if (conv == null) return;
     activeConversationId = conversationId;
     error = null;
+    // Ouvrir vaut lecture : le compteur de non-lus retombe à zéro, quel que
+    // soit le réglage des accusés de lecture — c'est un repère local, pas un
+    // signal envoyé au correspondant.
+    if (conv.unread != 0) {
+      conv.unread = 0;
+      unawaited(_saveConversations());
+    }
     notifyListeners();
     unawaited(_restoreSessions(conv).then((_) async {
       notifyListeners();
@@ -693,6 +700,7 @@ class ChatService extends ChangeNotifier {
         _conversations[convId] = conv;
       }
       activeConversationId = convId;
+      conv.unread = 0; // on la regarde : plus rien en attente
 
       await _restoreSessions(conv);
       await _openSessionsWith(conv, peerUserId);
@@ -1439,6 +1447,7 @@ class ChatService extends ChangeNotifier {
       attachment: payload.attachment,
     ));
     conv.lastActivity = DateTime.now();
+    if (conv.id != activeConversationId) conv.unread++;
     await _saveHistory(conv);
     return conv;
   }
@@ -2948,6 +2957,9 @@ class ChatService extends ChangeNotifier {
           attachment: payload.attachment,
         ));
         conv.lastActivity = DateTime.now();
+        // Non-lu : un message reçu dans une conversation qu'on ne regarde pas.
+        // Ses propres messages (rétro-remis d'un autre appareil) ne comptent pas.
+        if (!fromMyself && conv.id != activeConversationId) conv.unread++;
         touched.add(conv);
       }
 

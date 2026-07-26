@@ -26,6 +26,7 @@ class Conversation {
     this.channelAdminDevice,
     this.channelIsAdmin = false,
     this.channelLinkSecret,
+    this.unread = 0,
   })  : memberUserIds = memberUserIds ?? {},
         ownDeviceIds = ownDeviceIds ?? {},
         targetDeviceIds = targetDeviceIds ?? {},
@@ -81,6 +82,11 @@ class Conversation {
   final List<ChatMessage> messages;
   DateTime lastActivity;
 
+  /// Messages reçus alors que cette conversation n'était pas ouverte. Purement
+  /// local et d'affichage : sans rapport avec les accusés de lecture, qui,
+  /// eux, sont optionnels et voyagent chiffrés. Remis à zéro à l'ouverture.
+  int unread;
+
   /// Canal de diffusion (un-vers-plusieurs) plutôt que conversation.
   ///
   /// L'admin publie, les abonnés lisent. On ne réutilise PAS `isGroup` : un
@@ -127,6 +133,7 @@ class Conversation {
         // Le secret du lien est une capacité de lecture : il vit ici parce que
         // « convs » est une entrée du coffre chiffré du moteur, jamais en clair.
         if (channelLinkSecret != null) 'chSecret': base64Encode(channelLinkSecret!),
+        if (unread > 0) 'unread': unread,
       };
 
   static Conversation fromJson(Map<String, Object?> json) => Conversation(
@@ -150,5 +157,6 @@ class Conversation {
         channelLinkSecret: json['chSecret'] == null
             ? null
             : base64Decode(json['chSecret'] as String),
+        unread: (json['unread'] as num?)?.toInt() ?? 0,
       );
 }

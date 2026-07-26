@@ -206,6 +206,16 @@ void main() {
           .firstWhere((m) => m.text == 'bonjour le groupe' && !m.mine);
       expect(message.author, equals(nomAlice),
           reason: 'le message de groupe reçu ne nomme pas son auteur');
+
+      // Non-lus : Bob n'a jamais ouvert ce groupe, le message reçu doit donc
+      // l'avoir marqué non-lu. L'ouvrir remet le compteur à zéro.
+      final convBob =
+          bob.conversations.firstWhere((c) => c.messages.contains(message));
+      expect(convBob.unread, greaterThanOrEqualTo(1),
+          reason: 'un message reçu hors conversation ouverte doit compter comme non-lu');
+      bob.openConversation(convBob.id);
+      expect(convBob.unread, equals(0),
+          reason: 'ouvrir la conversation doit remettre les non-lus à zéro');
     }, timeout: const Timeout(Duration(minutes: 2)));
   });
 }

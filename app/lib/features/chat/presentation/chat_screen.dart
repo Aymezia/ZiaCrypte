@@ -684,8 +684,14 @@ class _ChatScreenState extends State<ChatScreen> {
                                 ),
                               ],
                             ),
-                      title: Text(c.peerUsername,
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      title: Text(
+                        c.peerUsername,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: c.unread > 0
+                            ? const TextStyle(fontWeight: FontWeight.w700)
+                            : null,
+                      ),
                       subtitle: Text(
                         last == null
                             // Une conversation sans message montre le statut
@@ -695,7 +701,16 @@ class _ChatScreenState extends State<ChatScreen> {
                             : '${last.mine ? "Vous : " : ""}${last.text}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: c.unread > 0
+                            ? TextStyle(
+                                color: theme.colorScheme.onSurface,
+                                fontWeight: FontWeight.w600)
+                            : null,
                       ),
+                      // Pastille de non-lus : le compte, à droite, à l'accent.
+                      trailing: c.unread > 0
+                          ? _badgeNonLus(theme, c.unread)
+                          : null,
                       onTap: () => s.openConversation(c.id),
                     );
                   },
@@ -1699,6 +1714,28 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
+
+  /// Pastille du nombre de messages non lus. Au-delà de 99, « 99+ » — un
+  /// compteur à quatre chiffres déforme la tuile sans rien apprendre d'utile.
+  Widget _badgeNonLus(ThemeData theme, int n) => Container(
+        constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+        padding: const EdgeInsets.symmetric(horizontal: 7),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary,
+          borderRadius: BorderRadius.circular(11),
+          boxShadow: ZiaTheme.glow(theme.colorScheme.primary,
+              opacity: 0.4, blur: 8),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          n > 99 ? '99+' : '$n',
+          style: TextStyle(
+            color: theme.colorScheme.onPrimary,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
 
   /// Bouton flottant « revenir en bas du fil ».
   ///
