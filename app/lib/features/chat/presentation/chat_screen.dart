@@ -36,9 +36,19 @@ class _ChatScreenState extends State<ChatScreen> {
   int _lastMessageCount = 0;
   UpdateNotifier? _maj;
 
+  /// L'utilisateur est-il en bas du fil ? On ne le ré-aspire vers le bas à
+  /// l'arrivée d'un message QUE dans ce cas : sinon, remonter lire l'historique
+  /// deviendrait impossible, chaque nouveau message annulant le défilement.
+  bool _enBas = true;
+
+  /// Un message est arrivé pendant qu'on lisait plus haut. Sert à colorer le
+  /// bouton « revenir en bas » pour signaler qu'il y a du nouveau.
+  bool _nouveauEnBas = false;
+
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_surDefilement);
     // Vérification discrète au lancement : une mise à jour qu'il faut penser à
     // aller chercher dans un menu n'est pas installée, et ce sont les
     // corrections de sécurité qui en pâtissent en premier.
@@ -72,18 +82,53 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  void _scrollToEndIfNeeded(int count) {
+  /// Suit la position pour savoir si l'on est « en bas » (à moins de 80 pixels
+  /// du fond). Le seuil évite qu'un pixel d'écart, après une animation, fasse
+  /// clignoter le bouton.
+  void _surDefilement() {
+    if (!_scroll.hasClients) return;
+    final enBas = _scroll.position.pixels >= _scroll.position.maxScrollExtent - 80;
+    if (enBas != _enBas) {
+      setState(() {
+        _enBas = enBas;
+        if (enBas) _nouveauEnBas = false;
+      });
+    }
+  }
+
+  void _allerEnBas() {
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(
+      _scroll.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+    setState(() => _nouveauEnBas = false);
+  }
+
+  /// Auto-défile à l'arrivée d'un message, mais seulement si l'utilisateur est
+  /// déjà en bas OU si le message est le sien. `mien` couvre l'envoi : on veut
+  /// toujours suivre son propre message, même après avoir remonté.
+  void _scrollToEndIfNeeded(int count, {bool mien = false}) {
     if (count == _lastMessageCount) return;
+    final aug = count > _lastMessageCount;
     _lastMessageCount = count;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+    if (!aug) return;
+
+    if (_enBas || mien) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.animateTo(
+            _scroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    } else if (!_nouveauEnBas) {
+      // On lisait plus haut : on ne bouge pas, mais on signale le nouveau.
+      setState(() => _nouveauEnBas = true);
+    }
   }
 
   Future<void> _pickAndSendFile() async {
@@ -409,7 +454,9 @@ class _ChatScreenState extends State<ChatScreen> {
         final s = widget.service;
         final wide = MediaQuery.of(context).size.width >= 720;
         final conv = s.active;
-        _scrollToEndIfNeeded(conv?.messages.length ?? 0);
+        final dernier = conv?.messages.isNotEmpty == true ? conv!.messages.last : null;
+        _scrollToEndIfNeeded(conv?.messages.length ?? 0,
+            mien: dernier?.mine ?? false);
 
         // Fenêtre étroite : on affiche soit la liste, soit la conversation.
         if (!wide) {
@@ -1626,6 +1673,31 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Bouton flottant « revenir en bas du fil ».
+  ///
+  /// Un point d'accent quand un message est arrivé pendant qu'on lisait plus
+  /// haut : on signale le nouveau sans forcer le défilement.
+  Widget _boutonRetourBas(ThemeData theme) => Material(
+        color: _nouveauEnBas
+            ? theme.colorScheme.primary
+            : theme.colorScheme.surfaceContainerHighest,
+        shape: const CircleBorder(),
+        elevation: 2,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: _allerEnBas,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: _nouveauEnBas
+                  ? theme.colorScheme.onPrimary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+
   Widget _messagesAndComposer(ThemeData theme, ChatService s) {
     final conv = s.active!;
     return Column(
@@ -1640,19 +1712,31 @@ class _ChatScreenState extends State<ChatScreen> {
                       style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant)),
                 )
-              : ListView.builder(
-                  controller: _scroll,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  itemCount: conv.messages.length,
-                  itemBuilder: (context, i) {
-                    final m = conv.messages[i];
-                    final precedent = i > 0 ? conv.messages[i - 1] : null;
-                    final suivant = i + 1 < conv.messages.length
-                        ? conv.messages[i + 1]
-                        : null;
-                    return _ligneMessage(theme, conv, m, precedent, suivant);
-                  },
+              : Stack(
+                  children: [
+                    ListView.builder(
+                      controller: _scroll,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      itemCount: conv.messages.length,
+                      itemBuilder: (context, i) {
+                        final m = conv.messages[i];
+                        final precedent = i > 0 ? conv.messages[i - 1] : null;
+                        final suivant = i + 1 < conv.messages.length
+                            ? conv.messages[i + 1]
+                            : null;
+                        return _ligneMessage(theme, conv, m, precedent, suivant);
+                      },
+                    ),
+                    // Bouton « revenir en bas », visible seulement quand on a
+                    // remonté. Coloré quand du nouveau est arrivé entre-temps.
+                    if (!_enBas)
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: _boutonRetourBas(theme),
+                      ),
+                  ],
                 ),
         ),
         if (s.ecritDans(conv.id))
