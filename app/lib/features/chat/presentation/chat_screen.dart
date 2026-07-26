@@ -127,9 +127,12 @@ class _ChatScreenState extends State<ChatScreen> {
           );
         }
       });
-    } else if (!_nouveauEnBas) {
-      // On lisait plus haut : on ne bouge pas, mais on signale le nouveau.
-      setState(() => _nouveauEnBas = true);
+    } else {
+      // On lisait plus haut : on ne bouge pas, on signale le nouveau. Cette
+      // méthode est appelée DEPUIS build ; un setState ici lèverait « setState()
+      // called during build ». On assigne donc le drapeau directement — le
+      // bouton de retour en bas, construit plus loin dans le MÊME build, le lit.
+      _nouveauEnBas = true;
     }
   }
 
