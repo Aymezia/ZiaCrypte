@@ -1186,6 +1186,20 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
+  /// Couleur stable dérivée d'un pseudo, pour colorer les noms d'auteurs en
+  /// groupe. Déterministe : le même pseudo garde sa teinte d'une session à
+  /// l'autre. La saturation et la luminosité s'adaptent au thème pour rester
+  /// lisibles sur fond clair comme sombre.
+  Color _couleurAuteur(ThemeData theme, String pseudo) {
+    var h = 0;
+    for (final c in pseudo.codeUnits) {
+      h = (h * 31 + c) & 0x7fffffff;
+    }
+    final teinte = (h % 360).toDouble();
+    final sombre = theme.brightness == Brightness.dark;
+    return HSLColor.fromAHSL(1, teinte, 0.55, sombre ? 0.72 : 0.42).toColor();
+  }
+
   Widget _bulle(ThemeData theme, ChatMessage m, bool suiteAvant, bool suiteApres) {
     final mien = m.mine;
     final encre =
@@ -1220,6 +1234,19 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Nom de l'auteur en tête de bloc, en groupe seulement : à plusieurs,
+          // on doit savoir qui parle. Une couleur dérivée du pseudo distingue
+          // les auteurs d'un coup d'œil sans légende.
+          if (!mien && !suiteAvant && m.author != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                m.author!,
+                style: theme.textTheme.labelSmall?.copyWith(
+                    color: _couleurAuteur(theme, m.author!),
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
           if (m.hasReply) _citation(theme, m, encre),
           if (m.deletedForEveryone)
             // On garde la place du message plutôt que de l'effacer : un trou

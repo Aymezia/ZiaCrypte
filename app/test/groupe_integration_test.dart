@@ -197,6 +197,15 @@ void main() {
           c.messages.any((m) => m.text == 'bonjour le groupe' && !m.mine)));
       expect(recu, isTrue,
           reason: 'Bob n’a pas déchiffré le message de groupe : ${bob.error}');
+
+      // Le message reçu porte le pseudo de l'auteur : c'est ce qui permet
+      // d'afficher qui parle dans un groupe. Sans ça, à plusieurs, les bulles
+      // reçues seraient anonymes.
+      final message = bob.conversations
+          .expand((c) => c.messages)
+          .firstWhere((m) => m.text == 'bonjour le groupe' && !m.mine);
+      expect(message.author, equals(nomAlice),
+          reason: 'le message de groupe reçu ne nomme pas son auteur');
     }, timeout: const Timeout(Duration(minutes: 2)));
   });
 }

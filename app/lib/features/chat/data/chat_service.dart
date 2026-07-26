@@ -2926,6 +2926,11 @@ class ChatService extends ChangeNotifier {
           text: payload.text,
           mine: fromMyself,
           at: DateTime.now(),
+          // En groupe, on retient le pseudo de l'auteur pour l'afficher : à
+          // plusieurs, savoir qui écrit est essentiel. En direct, inutile.
+          author: (conv.isGroup && !fromMyself)
+              ? (m['senderUsername'] as String?)
+              : null,
           // L'échéance est calculée chez CHAQUE partie à partir du réglage
           // partagé, plutôt que transportée par l'expéditeur : sinon celui-ci
           // pourrait annoncer une échéance longue tout en affichant courte

@@ -20,6 +20,7 @@ class ChatMessage {
     this.readAckSent = false,
     this.systeme = false,
     this.expiresAt,
+    this.author,
   });
 
   /// Instant après lequel ce message doit disparaître, si la conversation a
@@ -35,6 +36,11 @@ class ChatMessage {
   /// le faire ressembler à un message donnerait à croire qu'il a été envoyé
   /// par quelqu'un, et donc qu'il peut être falsifié par ce quelqu'un.
   final bool systeme;
+
+  /// Pseudo de l'auteur, pour un message REÇU en groupe. Null en conversation
+  /// directe (l'auteur est le correspondant, sans ambiguïté) et pour ses
+  /// propres messages. Affiché au-dessus de la bulle, une fois par bloc.
+  final String? author;
 
   /// Message envoyé, confirmé lu par le correspondant (si celui-ci a activé
   /// les accusés de lecture — ils sont facultatifs des deux côtés).
@@ -108,6 +114,7 @@ class ChatMessage {
         if (readByPeer) 'lu': true,
         if (readAckSent) 'la': true,
         if (systeme) 'sys': true,
+        if (author != null) 'au': author,
         if (expiresAt != null) 'exp': expiresAt!.millisecondsSinceEpoch,
       };
 
@@ -132,6 +139,7 @@ class ChatMessage {
         readByPeer: json['lu'] as bool? ?? false,
         readAckSent: json['la'] as bool? ?? false,
         systeme: json['sys'] as bool? ?? false,
+        author: json['au'] as String?,
         expiresAt: json['exp'] == null
             ? null
             : DateTime.fromMillisecondsSinceEpoch((json['exp'] as num).toInt()),
