@@ -108,8 +108,14 @@ for abi in "${ABIS[@]}"; do
   echo ">> [$abi] compilation de libzia_crypto.so"
   out_dir="$JNI_LIBS/$abi"
   mkdir -p "$out_dir"
+  # -static-libstdc++ : le runtime C++ (libc++_shared.so) est lié STATIQUEMENT.
+  # Sans lui, le .so réclame libc++_shared.so à l'exécution, absente de l'APK —
+  # l'application plante au tout premier chargement du moteur avec
+  # « dlopen failed: library "libc++_shared.so" not found ». Sûr ici : le moteur
+  # n'expose qu'une ABI C (extern "C"), donc aucun objet C++ ne franchit la
+  # frontière, seul cas où un runtime C++ statique poserait problème.
   "$TOOLCHAIN/bin/${host}${API_LEVEL}-clang++" \
-    -std=c++20 -O2 -DNDEBUG -fPIC -shared \
+    -std=c++20 -O2 -DNDEBUG -fPIC -shared -static-libstdc++ \
     -I"$ROOT/include" -I"$ROOT/src" -I"$sodium_prefix/include" \
     -I"$oqs_prefix/include" \
     "$ROOT/src/engine.cpp" "$ROOT/src/identity.cpp" "$ROOT/src/x3dh.cpp" \
