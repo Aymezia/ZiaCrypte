@@ -1,6 +1,6 @@
-# ZiaCrypte v0.10.0 — presence, personal status, and message padding
+# ZiaCrypte v0.11.0 — broadcast channels, and a fix that lets Android start
 
-Three visible additions, one invisible. The visible ones: you can see when a correspondent is online, and write a status about yourself — both without telling the server anything new. The invisible one: every message now leaves at a fixed size.
+The headline is channels: a one-to-many feed where you publish and subscribers read — end-to-end encrypted, like everything else here. And a fix without which the Android app of the previous release simply would not start.
 
 ## Downloads
 
@@ -14,42 +14,30 @@ Three visible additions, one invisible. The visible ones: you can see when a cor
 
 Every asset is signed, and the application verifies the signature before installing an update.
 
-## Online presence — opt-in, and only for people you talk to
+## Android now starts
 
-A dot next to a correspondent tells you they are reachable. Two locks make that safe:
+The v0.10.0 APK crashed at launch — `dlopen failed: library "libc++_shared.so" not found`. The native engine was linked against the shared C++ runtime, which wasn't bundled. The bug hid this long because Android had only ever been compiled and symbol-checked, never run on a device. The runtime is now linked statically into the engine; it exposes a pure C interface, so nothing is lost. Verified: the dependency is gone from the `.so` inside the final APK, on all three ABIs.
 
-- **Nothing is broadcast until you ask for it.** Sharing your presence is off by default, exactly like read receipts. The hour at which you open a messenger says when you sleep and when you work — nobody should give that away without choosing to. Clients that predate the feature stay silent on their own.
-- **You can only watch devices you already share a conversation with**, never across a block. Blocking someone cuts presence both ways, immediately, without waiting for a reconnection.
+## Broadcast channels
 
-There is **no "last seen at"**. A coarse online/offline dot is a convenience; a timestamped history of connections is a sleep diary. You can also watch others without showing yourself — the reciprocity other messengers impose is a politeness rule, not a security one.
+A channel is a one-to-many feed: an admin publishes, subscribers read. It stays end-to-end encrypted — which is the hard part, because a public feed and secrecy pull against each other. The way they're squared here: **the invite link carries the key.**
 
-The server learns nothing new here: it holds the WebSocket, so it already knew who was connected. What changes is what *other people* learn, which is why the whole feature is built around consent.
+- **The link is the key.** A channel's read key is sealed under a secret that lives only in the invite link, after the `#` — a URL fragment never reaches the server. Whoever holds the link can read; the server, which stores only the sealed blob, cannot. The channel's name travels in the link too, so even that stays off the server.
+- **Only the admin can publish.** Not because a rule says so, but because the cryptography enforces it: subscribers receive the *read* key, never the signing key. A message a subscriber tried to forge would be rejected by everyone else's client.
+- **The tradeoff, stated plainly.** For a channel, the server sees the list of subscribed devices — it has to know where to copy a post. That's inherent to an open, link-joinable feed, and it's a different bargain from private conversations, which keep sender anonymity. The *content* stays secret either way.
 
-## Personal status
+To use it: the **+** menu offers *Channel* (create one, then share the link it gives you) and *Join a channel* (paste a link). An admin's channel shows a composer; a subscriber's shows a read-only banner.
 
-A sentence about yourself — "Available", "In a meeting". It does **not** go into a column next to your username, where the host could read it. It travels through the encrypted channel, like profile photos and ephemeral-message settings, and is kept in the engine's encrypted vault.
+Two current limits worth knowing: removing a subscriber doesn't yet rotate the key automatically (until the admin rotates it, a removed subscriber can still read), and channels are text-only for now.
 
-A phrase people write about themselves often says more than an address book: "in hospital until Friday", "new number", a first name, a town. The consequence is assumed: only people you have an open conversation with see your status.
+## Under the hood
 
-## Message padding
-
-The server cannot decrypt anything, and since sealed sender it often cannot tell who is writing to whom. It could still see one thing — **the size of every blob**. A read receipt, a group key distribution and a short "ok" each have a characteristic length, and the sequence of sizes draws the shape of a conversation.
-
-Messages are now padded to 160-byte buckets before encryption, control messages included. Measured over a full two-client test run — messages, statuses, control traffic, a group message — the database ended up holding exactly **two distinct ciphertext sizes** instead of one per message. The overhead is bounded at 159 bytes, whatever the message.
-
-The padding is made of spaces rather than the usual `0x80`-and-zeros: the payload is JSON, trailing whitespace is legal there, so clients from previous versions read padded messages correctly without knowing anything about padding. No negotiation, no wire-format change.
-
-## Under the hood: post-quantum groundwork
-
-The engine now implements **PQXDH**, hybrid key agreement combining X25519 with ML-KEM-768 (FIPS 203, via liboqs). What is captured today becomes decryptable the day a quantum machine exists; the post-quantum component is *added* to the Diffie-Hellman exchanges rather than replacing any of them, so breaking ML-KEM leaves today's security intact, and breaking X25519 leaves the post-quantum protection standing.
-
-**It is not active on the wire yet.** The server does not relay the encapsulation key, so sessions still negotiate classic X3DH. This release puts the machinery in place — including a device identity format that can carry post-quantum keys — so the next one can switch it on without a migration. The fallback path is deliberate and tested: it is what keeps already-installed clients working.
+Post-quantum key agreement (PQXDH, X25519 + ML-KEM-768) remains implemented in the engine and still not active on the wire — the groundwork is in place for a later release to switch it on without a migration.
 
 ## Verified by actually running it
 
-- Engine suites: **7/7**, including six new PQXDH checks, and again under ASan + UBSan
+- Engine suites: **8/8**, including the six PQXDH checks and six new channel checks, and again under ASan + UBSan
 - The same engine cross-compiled for Windows: **12/12** under wine
-- Flutter suite: **46 passed**; two-client integration against a dedicated server: all passed
-- Backend suite against a real PostgreSQL: **54 passed**
-
-One finding worth recording: the engine's presets build in `Release`, so `NDEBUG` was erasing every `assert()` in the test suite. The binaries ran, printed their "[OK]" lines, and verified nothing beyond the absence of a crash. `NDEBUG` is now stripped from test targets, and the suites pass with their checks genuinely enforced.
+- Flutter suite **46 passed**; two-client integration (channels, groups, presence, status) against a dedicated server: all passed
+- Backend suite against a real PostgreSQL: **61 passed**
+- The channel's content was checked absent from the database: zero plaintext in channel blobs
