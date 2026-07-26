@@ -2565,7 +2565,8 @@ class ChatService extends ChangeNotifier {
   /// Chiffre un fichier, le dépose sur le stockage objet, puis envoie sa
   /// référence et sa clé dans un message chiffré de bout en bout.
   Future<void> sendAttachment(String filePath) async {
-    final bytes = await File(filePath).readAsBytes();
+    final bytes = await _lireFichier(filePath, 'Fichier introuvable');
+    if (bytes == null) return;
     final fileName = filePath.split(Platform.pathSeparator).last;
     await _uploadAndSend(bytes, fileName, label: '📎 $fileName');
   }
@@ -2574,10 +2575,32 @@ class ChatService extends ChangeNotifier {
   /// jointe (chemin déjà éprouvé), avec une durée qui voyage dans le message
   /// chiffré. L'octet audio ne touche le réseau que chiffré.
   Future<void> sendVoiceMessage(String filePath, int durationMs) async {
-    final bytes = await File(filePath).readAsBytes();
+    final bytes = await _lireFichier(
+        filePath, 'Enregistrement vocal introuvable — micro refusé ?');
+    if (bytes == null) return;
     final fileName = filePath.split(Platform.pathSeparator).last;
     await _uploadAndSend(bytes, fileName,
         label: '🎤 Message vocal', voiceDurationMs: durationMs);
+  }
+
+  /// Lit un fichier local, ou signale une erreur lisible et renvoie null.
+  ///
+  /// Ces lectures se faisaient à nu, HORS de tout try/catch : un fichier absent
+  /// — un enregistrement vocal qui n'a pas abouti, une pièce jointe déplacée —
+  /// remontait en FileSystemException non capturée et affichait l'écran
+  /// d'erreur rouge. Mieux vaut un message et un envoi annulé.
+  Future<Uint8List?> _lireFichier(String filePath, String messageSiAbsent) async {
+    try {
+      final f = File(filePath);
+      if (!await f.exists()) {
+        _setBusy(false, err: messageSiAbsent);
+        return null;
+      }
+      return await f.readAsBytes();
+    } catch (e) {
+      _setBusy(false, err: '$messageSiAbsent (${_humanize(e)})');
+      return null;
+    }
   }
 
   /// Chiffre et dépose des octets sur le stockage, puis renvoie la référence.
