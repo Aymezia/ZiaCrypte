@@ -28,6 +28,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   bool get _needsUsername => _mode != _Mode.reconnexion;
 
+  /// Mot de passe masqué par défaut ; l'œil le révèle. Son absence obligeait à
+  /// taper à l'aveugle, première cause d'erreur de saisie sur mobile.
+  bool _obscure = true;
+
   @override
   void dispose() {
     _server.dispose();
@@ -146,6 +150,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       if (_needsUsername) ...[
                         TextFormField(
                           controller: _username,
+                          // Le premier champ visible reçoit le focus : à la
+                          // création, c'est le pseudo (le mot de passe le prend
+                          // à la reconnexion, où le pseudo est absent).
+                          autofocus: _needsUsername,
                           decoration: const InputDecoration(
                             labelText: 'Nom d’utilisateur',
                             prefixIcon: Icon(Icons.person_outline),
@@ -160,18 +168,36 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
                       TextFormField(
                         controller: _password,
-                        obscureText: true,
+                        obscureText: _obscure,
                         autofocus: !_needsUsername,
                         onFieldSubmitted: (_) => _submit(),
-                        decoration: const InputDecoration(
+                        // Réévalue la jauge de robustesse à chaque frappe (mode
+                        // création seulement, où elle est affichée).
+                        onChanged: _mode == _Mode.creation
+                            ? (_) => setState(() {})
+                            : null,
+                        decoration: InputDecoration(
                           labelText: 'Mot de passe',
-                          prefixIcon: Icon(Icons.key_outlined),
-                          border: OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.key_outlined),
+                          border: const OutlineInputBorder(),
+                          suffixIcon: IconButton(
+                            tooltip: _obscure ? 'Afficher' : 'Masquer',
+                            icon: Icon(_obscure
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined),
+                            onPressed: () => setState(() => _obscure = !_obscure),
+                          ),
                         ),
                         validator: (v) => (v == null || v.length < 8)
                             ? '8 caractères minimum'
                             : null,
                       ),
+
+                      // Robustesse indiquée seulement à la création : elle guide
+                      // le choix d'un mot de passe neuf. À la reconnexion, juger
+                      // un mot de passe déjà choisi ne servirait qu'à inquiéter.
+                      if (_mode == _Mode.creation && _password.text.isNotEmpty)
+                        _jaugeRobustesse(theme, _password.text),
 
                       // Champ de code affiché seulement quand le serveur l'a
                       // réclamé : on ne demande pas le second facteur d'emblée,
@@ -290,6 +316,50 @@ class _ConnectScreenState extends State<ConnectScreen> {
         boxShadow: ZiaTheme.glow(c.primary, opacity: 0.45, blur: 28),
       ),
       child: Icon(Icons.lock_rounded, size: 44, color: c.onPrimary),
+    );
+  }
+
+  /// Jauge de robustesse du mot de passe : indicative, jamais bloquante (le
+  /// seul refus reste « 8 caractères minimum »). Score simple — longueur et
+  /// variété de familles de caractères — pas une mesure d'entropie exacte, mais
+  /// assez pour pousser vers plus long et plus varié.
+  Widget _jaugeRobustesse(ThemeData theme, String mdp) {
+    var score = 0;
+    if (mdp.length >= 8) score++;
+    if (mdp.length >= 12) score++;
+    if (RegExp(r'[A-Z]').hasMatch(mdp) && RegExp(r'[a-z]').hasMatch(mdp)) score++;
+    if (RegExp(r'[0-9]').hasMatch(mdp)) score++;
+    if (RegExp(r'[^A-Za-z0-9]').hasMatch(mdp)) score++;
+    // 0-5 → trois paliers.
+    final niveau = score <= 2 ? 0 : (score <= 3 ? 1 : 2);
+    final (libelle, couleur) = switch (niveau) {
+      0 => ('Faible', theme.colorScheme.error),
+      1 => ('Moyen', theme.colorScheme.tertiary),
+      _ => ('Fort', theme.colorScheme.primary),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          for (var i = 0; i < 3; i++) ...[
+            Expanded(
+              child: Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  color: i <= niveau
+                      ? couleur
+                      : theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            if (i < 2) const SizedBox(width: 4),
+          ],
+          const SizedBox(width: 10),
+          Text(libelle,
+              style: theme.textTheme.labelSmall?.copyWith(color: couleur)),
+        ],
+      ),
     );
   }
 
