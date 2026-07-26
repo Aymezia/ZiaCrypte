@@ -36,10 +36,10 @@ enum PushPlatform {
 }
 
 model User {
-  id           String    @id @default(uuid()) @db.Uuid
-  username     String    @unique
-  displayName  String    @map("display_name")
-  passwordHash String?   @map("password_hash")
+  id            String    @id @default(uuid()) @db.Uuid
+  username      String    @unique
+  displayName   String    @map("display_name")
+  passwordHash  String?   @map("password_hash")
   // Second facteur TOTP. Le secret n'est jamais renvoyé par l'API après
   // l'enrôlement. totpEnabledAt distingue « secret généré, en attente de
   // confirmation » de « 2FA réellement active » : tant qu'un premier code
@@ -49,11 +49,11 @@ model User {
   // Rôle. « admin » n'ouvre AUCUN accès aux messages : les routes
   // d'administration ne touchent que des métadonnées, et rien dans le serveur
   // ne peut déchiffrer quoi que ce soit — les clés n'y sont jamais passées.
-  role UserRole @default(user)
+  role          UserRole  @default(user)
 
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  deletedAt    DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   // Jeton de réinitialisation émis par un administrateur, à la demande de
   // l'utilisateur. Stocké HACHÉ : l'administrateur le transmet une fois et le
@@ -72,6 +72,9 @@ model User {
   blocksMade     Block[] @relation("Blocker")
   blocksReceived Block[] @relation("Blocked")
 
+  channelsAdministered Channel[]           @relation("ChannelAdmin")
+  channelSubscriptions ChannelSubscriber[]
+
   @@map("users")
 }
 
@@ -89,12 +92,12 @@ model WebauthnCredential {
 }
 
 model Device {
-  id                String   @id @default(uuid()) @db.Uuid
-  userId            String   @map("user_id") @db.Uuid
-  deviceName        String   @map("device_name")
+  id                String         @id @default(uuid()) @db.Uuid
+  userId            String         @map("user_id") @db.Uuid
+  deviceName        String         @map("device_name")
   platform          DevicePlatform
-  identityPublicKey Bytes    @map("identity_public_key")
-  isActive          Boolean  @default(true) @map("is_active")
+  identityPublicKey Bytes          @map("identity_public_key")
+  isActive          Boolean        @default(true) @map("is_active")
 
   // Jeton de remise pour l'expéditeur scellé.
   //
@@ -105,19 +108,21 @@ model Device {
   // C'est ce jeton qui remplace l'authentification au dépôt : celui qui le
   // détient peut déposer un blob pour cet appareil SANS dire qui il est. Le
   // serveur perd ainsi la moitié du graphe social qu'il observait.
-  deliveryTokenHash String? @map("delivery_token_hash")
+  deliveryTokenHash String?  @map("delivery_token_hash")
   createdAt         DateTime @default(now()) @map("created_at")
   lastSeenAt        DateTime @default(now()) @map("last_seen_at")
 
-  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  signedPrekeys      SignedPrekey[]
-  oneTimePrekeys     OneTimePrekey[]
-  signaturesGiven    DeviceSignature[] @relation("Signer")
-  signaturesReceived DeviceSignature[] @relation("Signed")
-  pushTokens         PushToken[]
-  authSessions       AuthSession[]
-  sentBlobs          MessageBlob[]     @relation("SentBlobs")
-  receivedBlobs      MessageBlob[]     @relation("ReceivedBlobs")
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  signedPrekeys        SignedPrekey[]
+  oneTimePrekeys       OneTimePrekey[]
+  signaturesGiven      DeviceSignature[]   @relation("Signer")
+  signaturesReceived   DeviceSignature[]   @relation("Signed")
+  pushTokens           PushToken[]
+  authSessions         AuthSession[]
+  sentBlobs            MessageBlob[]       @relation("SentBlobs")
+  receivedBlobs        MessageBlob[]       @relation("ReceivedBlobs")
+  channelsAdministered Channel[]           @relation("ChannelAdminDevice")
+  channelSubscriptions ChannelSubscriber[]
 
   @@map("devices")
 }
@@ -200,8 +205,12 @@ model MessageBlob {
   // jeton de remise ne dit ni qui l'envoie, ni dans quelle conversation. Ces
   // deux champs étaient précisément ce que le serveur observait du graphe
   // social — les garder obligatoires aurait vidé le scellement de son sens.
-  conversationId String? @map("conversation_id") @db.Uuid
-  senderDeviceId String? @map("sender_device_id") @db.Uuid
+  conversationId    String?   @map("conversation_id") @db.Uuid
+  // Renseigné pour un post de CANAL, à la place de conversationId. Le blob
+  // emprunte alors le même tuyau de remise que tout le reste ; le client le
+  // route vers la clé du canal parce que ce champ est présent.
+  channelId         String?   @map("channel_id") @db.Uuid
+  senderDeviceId    String?   @map("sender_device_id") @db.Uuid
   recipientDeviceId String    @map("recipient_device_id") @db.Uuid
   clientMessageId   String    @map("client_message_id") @db.Uuid
   ratchetHeader     Bytes     @map("ratchet_header")
@@ -210,13 +219,14 @@ model MessageBlob {
   deliveredAt       DateTime? @map("delivered_at")
   expiresAt         DateTime  @map("expires_at")
 
-  conversation Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation?    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  channel      Channel?         @relation(fields: [channelId], references: [id], onDelete: Cascade)
   // Cascade des deux côtés : un blob non remis à un appareil supprimé est
   // indéchiffrable de toute façon (ses clés privées ont disparu avec lui). Le
   // conserver bloquerait la suppression de compte et garderait du chiffré sans
   // titulaire — l'inverse de la minimisation des données.
-  sender       Device?         @relation("SentBlobs", fields: [senderDeviceId], references: [id], onDelete: Cascade)
-  recipient    Device          @relation("ReceivedBlobs", fields: [recipientDeviceId], references: [id], onDelete: Cascade)
+  sender       Device?          @relation("SentBlobs", fields: [senderDeviceId], references: [id], onDelete: Cascade)
+  recipient    Device           @relation("ReceivedBlobs", fields: [recipientDeviceId], references: [id], onDelete: Cascade)
   receipts     MessageReceipt[]
 
   @@unique([recipientDeviceId, clientMessageId])
@@ -232,6 +242,66 @@ model MessageReceipt {
 
   @@id([messageBlobId, eventType])
   @@map("message_receipts")
+}
+
+/// Canal de diffusion (un-vers-plusieurs).
+///
+/// Un admin publie, des abonnés lisent. Le serveur ne peut RIEN déchiffrer : la
+/// clé de lecture, `sealedKey`, est scellée sous le secret du lien d'invitation
+/// — un secret qui n'atteint jamais le serveur. Le posséder suffit à lire, ne
+/// pas le posséder rend `sealedKey` inexploitable.
+///
+/// Compromis assumé, propre au canal ouvert : le serveur voit la liste des
+/// appareils abonnés (il doit bien savoir à qui recopier un post). C'est le
+/// prix de l'ouverture par lien, qui casse l'anonymat de l'expéditeur scellé
+/// des conversations privées. Le CONTENU, lui, reste secret.
+model Channel {
+  id String @id @default(uuid()) @db.Uuid
+
+  // Admin = créateur. Nullables comme Conversation.createdBy : si le compte ou
+  // l'appareil disparaît, le canal survit pour ses abonnés plutôt que de
+  // bloquer la suppression. Un canal sans admin ne reçoit simplement plus de
+  // posts — ses abonnés gardent l'historique déjà remis.
+  adminUserId   String? @map("admin_user_id") @db.Uuid
+  adminDeviceId String? @map("admin_device_id") @db.Uuid
+
+  // Clé de lecture scellée sous le secret du lien (zia_channel_seal_key). Le
+  // serveur ne la stocke que pour la resservir aux nouveaux venus ; il ne peut
+  // pas l'ouvrir. Null tant que l'admin ne l'a pas déposée.
+  sealedKey Bytes? @map("sealed_key")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  admin       User?   @relation("ChannelAdmin", fields: [adminUserId], references: [id], onDelete: SetNull)
+  adminDevice Device? @relation("ChannelAdminDevice", fields: [adminDeviceId], references: [id], onDelete: SetNull)
+
+  subscribers  ChannelSubscriber[]
+  messageBlobs MessageBlob[]
+
+  @@map("channels")
+}
+
+/// Abonnement d'un APPAREIL à un canal.
+///
+/// Par appareil, pas par compte : la remise vise des appareils, et un même
+/// compte peut suivre un canal depuis certains des siens seulement.
+model ChannelSubscriber {
+  channelId String   @map("channel_id") @db.Uuid
+  deviceId  String   @map("device_id") @db.Uuid
+  // Redondant avec device.userId, mais évité une jointure à chaque suppression
+  // de compte et permet de lister « mes abonnements » sans passer par les
+  // appareils un à un.
+  userId    String   @map("user_id") @db.Uuid
+  joinedAt  DateTime @default(now()) @map("joined_at")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  device  Device  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([channelId, deviceId])
+  @@index([deviceId])
+  @@index([userId])
+  @@map("channel_subscribers")
 }
 
 model AttachmentRef {
@@ -290,7 +360,6 @@ model AuthSession {
 
 /**
  * Blocage d'un compte par un autre.
- *
  * Appliqué CÔTÉ SERVEUR, pas seulement à l'affichage : un blocage repose
  * uniquement dans l'application laisserait la personne bloquée déposer des
  * blobs, consommer du stockage et voir ses messages « remis ». Le serveur ne
@@ -317,7 +386,6 @@ enum UserRole {
 
 /**
  * Journal des actions d'administration.
- *
  * Distinct d'AuditLog : celui-ci n'est jamais purgé et ne peut être ni modifié
  * ni supprimé par l'API. Un pouvoir sans trace n'est pas un pouvoir encadré —
  * c'est ce registre qui rend une suppression de compte contestable après coup.
@@ -345,9 +413,7 @@ enum ReportStatus {
 
 /**
  * Signalement d'un contenu abusif.
- *
  * ## Pourquoi le serveur détient ici du texte en clair — et seulement ici
- *
  * Le serveur ne peut pas lire les messages : il n'a aucune clé. La modération
  * ne peut donc PAS partir de lui. Elle part de celui qui REÇOIT : lui seul a
  * déchiffré le message, lui seul peut décider de le révéler. Ce modèle stocke
@@ -355,13 +421,10 @@ enum ReportStatus {
  * abus — pas ce que le serveur aurait intercepté. Le chiffrement de bout en
  * bout n'est pas contourné : il est respecté, et le seul à pouvoir lever le
  * voile est la victime, sur son propre message.
- *
  * `content` est ce clair volontairement fourni. Il peut être vide : un
  * signalement reste recevable même sans copie du message (harcèlement répété,
  * spam), le nom du compte visé suffit à agir.
- *
  * ## Sans clés étrangères vers les comptes
- *
  * Comme AdminAction : un signalement doit survivre à la suppression du compte
  * qu'il vise ou de celui qui l'a émis — sinon supprimer un compte effacerait
  * les preuves qui justifiaient de le supprimer. On garde les identifiants ET

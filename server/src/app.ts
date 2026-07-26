@@ -8,6 +8,7 @@ import { blocksRoutes } from './modules/blocks/blocks.routes.js';
 import { reportsRoutes } from './modules/reports/reports.routes.js';
 import { attachmentsRoutes } from './modules/attachments/attachments.routes.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
+import { channelsRoutes } from './modules/channels/channels.routes.js';
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js';
 import { devicesRoutes } from './modules/devices/devices.routes.js';
 import { messagesRoutes } from './modules/messages/messages.routes.js';
@@ -53,6 +54,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await authRoutes(v1);
       await devicesRoutes(v1);
       await conversationsRoutes(v1);
+      await channelsRoutes(v1);
       await messagesRoutes(v1);
       await usersRoutes(v1);
       await attachmentsRoutes(v1);

@@ -217,6 +217,10 @@ export async function messagesRoutes(app: FastifyInstance) {
     return pending.map((m) => ({
       id: m.id,
       conversationId: m.conversationId,
+      // Présent pour un post de CANAL : le client route alors vers la clé du
+      // canal au lieu de chercher une conversation. senderDeviceId porte
+      // l'appareil de l'admin, qui sert d'identifiant d'expéditeur.
+      channelId: m.channelId,
       senderDeviceId: m.senderDeviceId,
       // Absents pour un message SCELLÉ : le serveur ne sait pas qui l'a
       // déposé, et c'est tout l'objet. Le client trouve l'expéditeur à
