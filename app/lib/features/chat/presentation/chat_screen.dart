@@ -62,7 +62,14 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _input.text.trim();
     if (text.isEmpty) return;
     _input.clear();
-    await widget.service.send(text);
+    final conv = widget.service.active;
+    // Dans un canal, publier passe par le chemin dédié (chiffrement unique,
+    // recopie serveur). Un abonné n'arrive jamais ici : son composeur est masqué.
+    if (conv != null && conv.isChannel) {
+      await widget.service.publierDansCanal(text);
+    } else {
+      await widget.service.send(text);
+    }
   }
 
   void _scrollToEndIfNeeded(int count) {
@@ -278,6 +285,121 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Création d'un canal : un nom, puis on montre le lien à partager.
+  Future<void> _promptNewChannel() async {
+    final nom = TextEditingController();
+    final creer = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Nouveau canal'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nom,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Nom du canal',
+                prefixIcon: Icon(Icons.campaign_outlined),
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) => Navigator.of(context).pop(true),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Tu publies, tes abonnés lisent. Le lien d’invitation contient la '
+              'clé de lecture : qui l’a peut lire, le serveur non. Ni le nom ni '
+              'les messages ne lui sont visibles.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Créer'),
+          ),
+        ],
+      ),
+    );
+    if (creer != true || nom.text.trim().isEmpty) return;
+    final lien = await widget.service.creerCanal(nom.text.trim());
+    if (lien != null && mounted) _montrerLien(lien);
+  }
+
+  /// Affiche le lien d'invitation d'un canal, avec un bouton copier.
+  void _montrerLien(String lien) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Lien du canal'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SelectableText(lien, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 10),
+            Text(
+              'Partage-le à qui tu veux abonner. Le posséder suffit à lire le '
+              'canal — traite-le comme un secret.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: lien));
+              Navigator.of(context).pop();
+            },
+            child: const Text('Copier'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Rejoindre un canal en collant son lien.
+  Future<void> _promptJoinChannel() async {
+    final champ = TextEditingController();
+    final lien = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rejoindre un canal'),
+        content: TextField(
+          controller: champ,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Lien d’invitation',
+            prefixIcon: Icon(Icons.link),
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(champ.text.trim()),
+            child: const Text('Rejoindre'),
+          ),
+        ],
+      ),
+    );
+    if (lien != null && lien.isNotEmpty) {
+      await widget.service.rejoindreCanalParLien(lien);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -419,15 +541,32 @@ class _ChatScreenState extends State<ChatScreen> {
               onPressed: () => SearchSheet.show(context, s),
               icon: const Icon(Icons.search),
             ),
-            IconButton(
-              tooltip: 'Nouvelle conversation',
-              onPressed: s.busy ? null : _promptNewConversation,
-              icon: const Icon(Icons.edit_square),
-            ),
-            IconButton(
-              tooltip: 'Nouveau groupe',
-              onPressed: s.busy ? null : _promptNewGroup,
-              icon: const Icon(Icons.group_add_outlined),
+            PopupMenuButton<int>(
+              tooltip: 'Nouveau',
+              enabled: !s.busy,
+              icon: const Icon(Icons.add),
+              onSelected: (v) {
+                switch (v) {
+                  case 0:
+                    _promptNewConversation();
+                  case 1:
+                    _promptNewGroup();
+                  case 2:
+                    _promptNewChannel();
+                  case 3:
+                    _promptJoinChannel();
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 0, child: ListTile(
+                    leading: Icon(Icons.edit_square), title: Text('Conversation'))),
+                PopupMenuItem(value: 1, child: ListTile(
+                    leading: Icon(Icons.group_add_outlined), title: Text('Groupe'))),
+                PopupMenuItem(value: 2, child: ListTile(
+                    leading: Icon(Icons.campaign_outlined), title: Text('Canal'))),
+                PopupMenuItem(value: 3, child: ListTile(
+                    leading: Icon(Icons.link), title: Text('Rejoindre un canal'))),
+              ],
             ),
             IconButton(
               tooltip: 'Options',
@@ -475,7 +614,15 @@ class _ChatScreenState extends State<ChatScreen> {
                     return ListTile(
                       selected: selected,
                       selectedTileColor: theme.colorScheme.surfaceContainerHighest,
-                      leading: c.isGroup || !s.enLigneDans(c.id)
+                      leading: c.isChannel
+                          // Un canal se distingue d'un contact au premier
+                          // coup d'œil : une pastille de diffusion, pas un avatar.
+                          ? CircleAvatar(
+                              backgroundColor: theme.colorScheme.primaryContainer,
+                              child: Icon(Icons.campaign,
+                                  color: theme.colorScheme.onPrimaryContainer),
+                            )
+                          : c.isGroup || !s.enLigneDans(c.id)
                           ? avatar
                           : Stack(
                               clipBehavior: Clip.none,
@@ -554,7 +701,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 )
               : null,
           title: _conversationTitle(theme, s),
-          actions: [_boutonEphemere(theme, s), _menuConversation(theme, s)],
+          actions: [
+            if (!(s.active?.isChannel ?? false)) _boutonEphemere(theme, s),
+            _menuConversation(theme, s),
+          ],
         ),
         body: _messagesAndComposer(theme, s),
       );
@@ -564,7 +714,10 @@ class _ChatScreenState extends State<ChatScreen> {
           AppBar(
             automaticallyImplyLeading: false,
             title: _conversationTitle(theme, s),
-            actions: [_boutonEphemere(theme, s), _menuConversation(theme, s)],
+            actions: [
+              if (!(s.active?.isChannel ?? false)) _boutonEphemere(theme, s),
+              _menuConversation(theme, s),
+            ],
           ),
           Expanded(child: _messagesAndComposer(theme, s)),
         ],
@@ -617,6 +770,36 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Menu de la conversation : pour l'instant, le blocage.
   Widget _menuConversation(ThemeData theme, ChatService s) {
     final conv = s.active!;
+
+    // Canal : partager le lien (admin), et quitter.
+    if (conv.isChannel) {
+      return PopupMenuButton<String>(
+        tooltip: 'Plus',
+        onSelected: (v) {
+          if (v == 'lien') {
+            final lien = s.lienDuCanal(conv);
+            if (lien != null) _montrerLien(lien);
+          } else if (v == 'quitter') {
+            s.quitterCanal(conv);
+          }
+        },
+        itemBuilder: (context) => [
+          if (conv.channelIsAdmin)
+            const PopupMenuItem(
+              value: 'lien',
+              child: ListTile(leading: Icon(Icons.link), title: Text('Partager le lien')),
+            ),
+          PopupMenuItem(
+            value: 'quitter',
+            child: ListTile(
+              leading: Icon(Icons.logout, color: theme.colorScheme.error),
+              title: Text(conv.channelIsAdmin ? 'Fermer pour moi' : 'Quitter'),
+            ),
+          ),
+        ],
+      );
+    }
+
     final peer = conv.peerUserId;
     // Rien à proposer sur un groupe : bloquer un groupe reviendrait à bloquer
     // des gens qu'on n'a pas choisi de bloquer.
@@ -691,6 +874,27 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _conversationTitle(ThemeData theme, ChatService s) {
     final conv = s.active!;
+
+    // Un canal n'a ni contact vérifié ni statut : il a un nom et un rôle.
+    if (conv.isChannel) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(conv.peerUsername, maxLines: 1, overflow: TextOverflow.ellipsis),
+          Row(children: [
+            Icon(Icons.campaign_outlined,
+                size: 11, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+            Text(
+              conv.channelIsAdmin ? 'Canal · vous publiez' : 'Canal · lecture seule',
+              style: theme.textTheme.bodySmall,
+            ),
+          ]),
+        ],
+      );
+    }
+
     // Un contact est « vérifié » seulement si TOUS ses appareils connus le
     // sont : en vérifier un et l'afficher comme sûr laisserait les autres
     // passer pour vérifiés sans l'être.
@@ -1466,7 +1670,58 @@ class _ChatScreenState extends State<ChatScreen> {
                       ?.copyWith(color: theme.colorScheme.primary)),
             ]),
           ),
-        if (s.replyingTo != null) _barreCitation(theme, s),
+        if (s.replyingTo != null && !conv.isChannel) _barreCitation(theme, s),
+        // Canal en lecture seule : un abonné ne publie pas. On le dit clairement
+        // plutôt que d'afficher un composeur qui n'aboutirait à rien.
+        if (conv.isChannel && !conv.channelIsAdmin)
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+              child: Row(children: [
+                Icon(Icons.lock_outline,
+                    size: 16, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Canal en lecture seule',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
+                ),
+                TextButton.icon(
+                  onPressed: () => widget.service.quitterCanal(conv),
+                  icon: const Icon(Icons.logout, size: 16),
+                  label: const Text('Quitter'),
+                ),
+              ]),
+            ),
+          )
+        // Canal dont je suis l'admin : un composeur de texte seul (pas de pièce
+        // jointe ni de voix pour l'instant), qui publie.
+        else if (conv.isChannel)
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+              child: Row(children: [
+                Expanded(
+                  child: TextField(
+                    controller: _input,
+                    onSubmitted: (_) => _send(),
+                    decoration: InputDecoration(
+                      hintText: 'Publier dans le canal…',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _boutonEnvoi(theme, true),
+              ]),
+            ),
+          )
+        else
         SafeArea(
           top: false,
           child: Padding(

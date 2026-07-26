@@ -41,7 +41,10 @@ const fromB64 = (s: string) => {
 // client remplir la base d'un blob arbitraire sous couvert de « clé ».
 const sealedKeySchema = z.string().max(4096);
 
-const createSchema = z.object({ sealedKey: sealedKeySchema });
+// La clé peut manquer à la création : le client a besoin de l'id du canal pour
+// ranger sa clé d'expéditeur AVANT de pouvoir la sceller, puis la dépose par
+// PUT …/key. Un canal sans clé existe, mais ne sert rien tant qu'elle manque.
+const createSchema = z.object({ sealedKey: sealedKeySchema.optional() });
 const keySchema = z.object({ sealedKey: sealedKeySchema });
 const postSchema = z.object({
   clientMessageId: z.string().uuid(),
@@ -58,7 +61,7 @@ export async function channelsRoutes(app: FastifyInstance) {
       data: {
         adminUserId: me.userId,
         adminDeviceId: me.deviceId,
-        sealedKey: fromB64(sealedKey),
+        sealedKey: sealedKey ? fromB64(sealedKey) : null,
       },
     });
     return reply.code(201).send({ id: channel.id, adminDeviceId: me.deviceId });

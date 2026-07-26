@@ -253,6 +253,66 @@ class ApiClient {
     });
   }
 
+  // ---- Canaux de diffusion ----
+
+  /// Crée un canal en déposant sa clé de lecture scellée. Renvoie l'id du canal
+  /// et l'appareil admin (le nôtre), qui sert d'identifiant d'expéditeur.
+  Future<Map<String, dynamic>> createChannel([String? sealedKeyB64]) async {
+    final res = await _dio.post<Map<String, dynamic>>('/v1/channels',
+        data: {if (sealedKeyB64 != null) 'sealedKey': sealedKeyB64});
+    return res.data!;
+  }
+
+  /// Métadonnées d'un canal (compteur d'abonnés, suis-je admin/abonné…).
+  Future<Map<String, dynamic>> channelInfo(String id) async {
+    final res = await _dio.get<Map<String, dynamic>>('/v1/channels/$id');
+    return res.data!;
+  }
+
+  /// Clé de lecture scellée d'un canal. Inutilisable sans le secret du lien.
+  Future<String> channelKey(String id) async {
+    final res = await _dio.get<Map<String, dynamic>>('/v1/channels/$id/key');
+    return res.data!['sealedKey'] as String;
+  }
+
+  /// Dépose (ou fait tourner) la clé scellée. Réservé à l'admin côté serveur.
+  Future<void> putChannelKey(String id, String sealedKeyB64) async {
+    await _dio.put<void>('/v1/channels/$id/key', data: {'sealedKey': sealedKeyB64});
+  }
+
+  /// Abonne l'appareil courant à un canal.
+  Future<void> subscribeChannel(String id) async {
+    await _dio.post<void>('/v1/channels/$id/subscribers');
+  }
+
+  /// Désabonne un appareil (le sien, ou n'importe lequel si l'on est admin).
+  Future<void> unsubscribeChannel(String id, String deviceId) async {
+    await _dio.delete<void>('/v1/channels/$id/subscribers/$deviceId');
+  }
+
+  /// Publie un message dans un canal (admin). Le serveur recopie à tous les
+  /// abonnés ; renvoie le nombre servi.
+  Future<int> postChannel({
+    required String id,
+    required String clientMessageId,
+    required String headerB64,
+    required String ciphertextB64,
+  }) async {
+    final res = await _dio.post<Map<String, dynamic>>('/v1/channels/$id/messages',
+        data: {
+          'clientMessageId': clientMessageId,
+          'header': headerB64,
+          'ciphertext': ciphertextB64,
+        });
+    return (res.data?['delivered'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Canaux administrés et suivis par cet appareil.
+  Future<Map<String, dynamic>> myChannels() async {
+    final res = await _dio.get<Map<String, dynamic>>('/v1/channels');
+    return res.data!;
+  }
+
   /// Nombre de one-time prekeys encore disponibles pour cet appareil.
   Future<int> oneTimePrekeyCount(String deviceId) async {
     final res = await _dio.get<Map<String, dynamic>>('/v1/devices/$deviceId/prekeys');

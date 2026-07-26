@@ -502,6 +502,42 @@ class NativeCryptoEngine {
     }
   }
 
+  /// Scelle le message de distribution d'un canal sous le secret du lien.
+  /// `linkSecret` doit faire 32 octets ; l'appelant le garantit.
+  Uint8List channelSealKey(Uint8List linkSecret, Uint8List distribution) {
+    final secret = _toNative(linkSecret);
+    final input = _toNative(distribution);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.channelSealKey(secret, input, distribution.length, outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(secret);
+      calloc.free(input);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
+  /// Ouvre la clé de lecture d'un canal avec le secret du lien. Échoue en
+  /// ZiaCryptoFailure si le secret est faux ou le blob altéré — indiscernables.
+  Uint8List channelOpenKey(Uint8List linkSecret, Uint8List sealed) {
+    final secret = _toNative(linkSecret);
+    final input = _toNative(sealed);
+    final outPtr = calloc<Pointer<Uint8>>();
+    final outLen = calloc<Size>();
+    try {
+      _check(_b.channelOpenKey(secret, input, sealed.length, outPtr, outLen));
+      return _copyAndFree(outPtr.value, outLen.value);
+    } finally {
+      calloc.free(secret);
+      calloc.free(input);
+      calloc.free(outPtr);
+      calloc.free(outLen);
+    }
+  }
+
   /// Ouvre une enveloppe scellée qui nous est destinée. Échoue si elle vise un
   /// autre appareil OU si elle a été altérée — indiscernables, et c'est correct.
   Uint8List sealedOpen(Uint8List sealed) {

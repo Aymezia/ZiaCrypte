@@ -1221,6 +1221,253 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  // ------------------------------------------------------------- Canaux
+  //
+  // Un canal de diffusion réutilise les clés d'expéditeur : l'admin détient la
+  // clé de signature (lui seul publie), les abonnés reçoivent la clé de LECTURE
+  // scellée sous le secret du lien d'invitation. Le serveur ne fait que garder
+  // le blob scellé et recopier les posts — il ne peut rien ouvrir.
+
+  /// Schéma du lien d'invitation. Le secret ET le nom voyagent APRÈS le « # » :
+  /// un fragment d'URL n'est pas transmis au serveur, ce qui garde le secret de
+  /// lecture — et jusqu'au nom du canal — hors de sa vue.
+  static const _schemeCanal = 'ziacrypte://canal/';
+
+  String _lienCanal(String id, Uint8List secret, String nom) {
+    final s = base64Url.encode(secret);
+    final n = base64Url.encode(utf8.encode(nom));
+    return '$_schemeCanal$id#$s.$n';
+  }
+
+  /// Crée un canal dont je deviens l'admin, et renvoie le lien à partager.
+  ///
+  /// Ordre imposé : le serveur assigne l'id, la clé d'expéditeur se range sous
+  /// cet id, puis on scelle et on dépose. Un canal existe donc un instant sans
+  /// clé — sans conséquence, personne n'a encore le lien.
+  Future<String?> creerCanal(String nom) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null || userId == null) return null;
+    final propre = nom.trim();
+    if (propre.isEmpty) {
+      _setBusy(false, err: 'Donne un nom au canal.');
+      return null;
+    }
+    _setBusy(true);
+    try {
+      final created = await api.createChannel();
+      final id = created['id'] as String;
+      final adminDevice = created['adminDeviceId'] as String;
+
+      // Secret du lien : 32 octets de la même source que les UUID. Il transite
+      // de toute façon par l'URL, donc rien ne gagnerait à le fabriquer côté
+      // moteur — mais la clé de LECTURE qu'il protège, elle, ne quitte pas le C++.
+      final secret = _octetsAleatoires(32);
+      final distribution = await gateway.engine.senderKeyCreate(id);
+      final scelle = await gateway.engine.channelSealKey(secret, distribution);
+      await api.putChannelKey(id, base64Encode(scelle));
+
+      final conv = Conversation(
+        id: id,
+        peerUsername: propre,
+        isChannel: true,
+        channelAdminDevice: adminDevice,
+        channelIsAdmin: true,
+        channelLinkSecret: secret,
+      );
+      _conversations[id] = conv;
+      activeConversationId = id;
+      await _saveConversations();
+      _setBusy(false);
+      return _lienCanal(id, secret, propre);
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+      return null;
+    }
+  }
+
+  /// Lien d'invitation d'un canal que j'administre. Null si je n'en suis pas
+  /// l'admin (je n'ai alors pas le secret).
+  String? lienDuCanal(Conversation conv) {
+    final secret = conv.channelLinkSecret;
+    if (!conv.isChannel || !conv.channelIsAdmin || secret == null) return null;
+    return _lienCanal(conv.id, secret, conv.peerUsername);
+  }
+
+  /// Rejoint un canal à partir d'un lien d'invitation.
+  ///
+  /// Le lien porte tout ce qu'il faut : l'id (public) et, après le « # »,
+  /// le secret de lecture et le nom. On récupère la clé scellée, on l'ouvre
+  /// avec le secret, on l'enregistre, et on s'abonne pour recevoir les posts.
+  Future<bool> rejoindreCanalParLien(String lien) async {
+    final api = _api;
+    final gateway = _gateway;
+    if (api == null || gateway == null) return false;
+    final parse = _analyserLien(lien.trim());
+    if (parse == null) {
+      _setBusy(false, err: 'Lien de canal invalide.');
+      return false;
+    }
+    final (id, secret, nom) = parse;
+    _setBusy(true);
+    try {
+      if (_conversations[id]?.isChannel == true) {
+        // Déjà abonné : on ouvre simplement le canal.
+        activeConversationId = id;
+        _setBusy(false);
+        notifyListeners();
+        return true;
+      }
+
+      final scelleB64 = await api.channelKey(id);
+      final distribution =
+          await gateway.engine.channelOpenKey(secret, base64Decode(scelleB64));
+      final info = await api.channelInfo(id);
+      final adminDevice = info['adminDeviceId'] as String?;
+      if (adminDevice == null) {
+        _setBusy(false, err: 'Ce canal n’a plus d’administrateur.');
+        return false;
+      }
+
+      // La clé de l'admin est rangée sous SON appareil : c'est l'identifiant
+      // d'expéditeur que porteront les posts, et donc celui qui déchiffrera.
+      await gateway.engine.senderKeyProcess(id, adminDevice, distribution);
+      await api.subscribeChannel(id);
+
+      final conv = Conversation(
+        id: id,
+        peerUsername: nom,
+        isChannel: true,
+        channelAdminDevice: adminDevice,
+        channelIsAdmin: false,
+        // Pas de secret conservé : on a déscellé la clé, il n'a plus d'usage.
+      );
+      _conversations[id] = conv;
+      conv.messages.addAll(await _readHistory(id));
+      activeConversationId = id;
+      await _saveConversations();
+      _setBusy(false);
+      notifyListeners();
+      return true;
+    } catch (e) {
+      // Un secret faux ou un canal introuvable échouent ici, indistinctement.
+      _setBusy(false, err: _humanize(e));
+      return false;
+    }
+  }
+
+  /// Publie dans un canal (admin seulement). Un seul chiffrement, le serveur
+  /// recopie à tous les abonnés.
+  Future<void> publierDansCanal(String texte) async {
+    final conv = active;
+    final api = _api;
+    final gateway = _gateway;
+    if (conv == null || api == null || gateway == null) return;
+    if (!conv.isChannel || !conv.channelIsAdmin) return;
+    final propre = texte.trim();
+    if (propre.isEmpty) return;
+    try {
+      final clair = _encodePayload(propre, null);
+      final chiffre = await gateway.engine.senderKeyEncrypt(conv.id, clair);
+      await api.postChannel(
+        id: conv.id,
+        clientMessageId: _uuidV4(),
+        headerB64: base64Encode(Envelope.packGroupHeader()),
+        ciphertextB64: base64Encode(chiffre),
+      );
+      // On affiche son propre post localement : le serveur ne nous le renvoie
+      // pas (il exclut l'appareil qui publie).
+      conv.messages.add(ChatMessage(text: propre, mine: true, at: DateTime.now()));
+      conv.lastActivity = DateTime.now();
+      await _saveHistory(conv);
+      notifyListeners();
+    } catch (e) {
+      _setBusy(false, err: _humanize(e));
+    }
+  }
+
+  /// Quitte un canal (abonné) ou le ferme pour soi (admin).
+  Future<void> quitterCanal(Conversation conv) async {
+    final api = _api;
+    if (api == null || !conv.isChannel || deviceId == null) return;
+    try {
+      await api.unsubscribeChannel(conv.id, deviceId!);
+    } catch (_) {
+      // Même injoignable, on retire le canal localement : l'utilisateur a
+      // demandé à partir, et la remise cessera de toute façon.
+    }
+    _conversations.remove(conv.id);
+    if (activeConversationId == conv.id) activeConversationId = null;
+    await _saveConversations();
+    notifyListeners();
+  }
+
+  /// Reçoit un post de canal, arrivé par le tuyau commun avec `channelId`.
+  ///
+  /// Renvoie la conversation touchée, ou null si l'on n'est pas (ou plus)
+  /// abonné à ce canal — auquel cas le blob est ignoré.
+  Future<Conversation?> _recevoirCanal(Map<String, dynamic> m) async {
+    final gateway = _gateway;
+    if (gateway == null) return null;
+    final canalId = m['channelId'] as String;
+    final conv = _conversations[canalId];
+    // Pas dans nos canaux : un post pour un canal qu'on a quitté, ou dont
+    // l'abonnement local a été perdu. Rien à afficher.
+    if (conv == null || !conv.isChannel) return null;
+    final sender = m['senderDeviceId'] as String?;
+    if (sender == null) return null;
+
+    Uint8List clair;
+    try {
+      clair = await gateway.engine
+          .senderKeyDecrypt(canalId, sender, base64Decode(m['ciphertext'] as String));
+    } catch (_) {
+      // Clé pas encore en place, ou post antérieur à une rotation : illisible,
+      // et le rester est correct.
+      return null;
+    }
+
+    final payload = _decodePayload(clair);
+    if (_estControle(payload.text) || _estAnnonceInterne(payload.text)) {
+      return null; // un canal ne porte pas de messages de contrôle
+    }
+    conv.messages.add(ChatMessage(
+      text: payload.text,
+      mine: false,
+      at: DateTime.fromMillisecondsSinceEpoch(
+          (m['timestampMs'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch),
+      attachment: payload.attachment,
+    ));
+    conv.lastActivity = DateTime.now();
+    await _saveHistory(conv);
+    return conv;
+  }
+
+  Uint8List _octetsAleatoires(int n) {
+    final r = Random.secure();
+    return Uint8List.fromList(List.generate(n, (_) => r.nextInt(256)));
+  }
+
+  /// Analyse un lien `ziacrypte://canal/<id>#<secret>.<nom>`.
+  (String, Uint8List, String)? _analyserLien(String lien) {
+    if (!lien.startsWith(_schemeCanal)) return null;
+    final reste = lien.substring(_schemeCanal.length);
+    final diese = reste.indexOf('#');
+    if (diese <= 0) return null;
+    final id = reste.substring(0, diese);
+    final frag = reste.substring(diese + 1);
+    final point = frag.indexOf('.');
+    if (point <= 0) return null;
+    try {
+      final secret = base64Url.decode(frag.substring(0, point));
+      final nom = utf8.decode(base64Url.decode(frag.substring(point + 1)));
+      if (secret.length != 32) return null;
+      return (id, secret, nom);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Préfixe des annonces internes échangées dans le canal chiffré.
   ///
   /// Elles servent à transmettre ce que le serveur ne doit pas connaître — à
@@ -2580,6 +2827,15 @@ class ChatService extends ChangeNotifier {
             ? await _ouvrirScelle(brut)
             : brut;
         if (m == null) continue; // enveloppe illisible : déjà signalée
+
+        // Post de CANAL : reconnu à channelId, routé vers la clé du canal. Il
+        // ne passe pas par la résolution de conversation pair-à-pair.
+        if (m['channelId'] != null) {
+          final c = await _recevoirCanal(m);
+          if (c != null) touched.add(c);
+          continue;
+        }
+
         final conv = await _resolveConversation(m);
         final sender = m['senderDeviceId'] as String;
         final enteteBrute = base64Decode(m['header'] as String);

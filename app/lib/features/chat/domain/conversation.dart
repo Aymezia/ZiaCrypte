@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'chat_message.dart';
 
 /// Une conversation avec un correspondant.
@@ -19,6 +22,10 @@ class Conversation {
     List<ChatMessage>? messages,
     DateTime? lastActivity,
     this.ttlSecondes = 0,
+    this.isChannel = false,
+    this.channelAdminDevice,
+    this.channelIsAdmin = false,
+    this.channelLinkSecret,
   })  : memberUserIds = memberUserIds ?? {},
         ownDeviceIds = ownDeviceIds ?? {},
         targetDeviceIds = targetDeviceIds ?? {},
@@ -74,8 +81,31 @@ class Conversation {
   final List<ChatMessage> messages;
   DateTime lastActivity;
 
+  /// Canal de diffusion (un-vers-plusieurs) plutôt que conversation.
+  ///
+  /// L'admin publie, les abonnés lisent. On ne réutilise PAS `isGroup` : un
+  /// groupe a des sessions pair-à-pair et tout le monde y écrit, un canal n'a ni
+  /// l'un ni l'autre — sa clé de lecture arrive scellée par le lien, pas par une
+  /// session.
+  final bool isChannel;
+
+  /// Appareil de l'admin du canal. Sert d'identifiant d'expéditeur pour
+  /// déchiffrer, exactement comme l'appareil émetteur d'un message de groupe.
+  String? channelAdminDevice;
+
+  /// Suis-je l'admin de ce canal (le seul à pouvoir publier) ?
+  bool channelIsAdmin;
+
+  /// Secret du lien d'invitation, 32 octets. Conservé par l'ADMIN seul — il en
+  /// a besoin pour régénérer le lien et pour re-sceller la clé lors d'une
+  /// rotation. Un abonné ne le garde pas : il a déscellé la clé une fois, à
+  /// l'adhésion, et n'en a plus l'usage.
+  Uint8List? channelLinkSecret;
+
   /// Une conversation est utilisable dès qu'au moins un appareil est joignable.
-  bool get ready => sessions.isNotEmpty;
+  /// Un canal, lui, est utilisable dès que sa clé de lecture est en place —
+  /// suivi côté service, pas ici.
+  bool get ready => isChannel || sessions.isNotEmpty;
 
   ChatMessage? get lastMessage => messages.isEmpty ? null : messages.last;
 
@@ -91,6 +121,12 @@ class Conversation {
         'devices': targetDeviceIds.toList(),
         'at': lastActivity.millisecondsSinceEpoch,
         if (ttlSecondes > 0) 'ttl': ttlSecondes,
+        if (isChannel) 'channel': true,
+        if (channelAdminDevice != null) 'chAdmin': channelAdminDevice,
+        if (channelIsAdmin) 'chOwner': true,
+        // Le secret du lien est une capacité de lecture : il vit ici parce que
+        // « convs » est une entrée du coffre chiffré du moteur, jamais en clair.
+        if (channelLinkSecret != null) 'chSecret': base64Encode(channelLinkSecret!),
       };
 
   static Conversation fromJson(Map<String, Object?> json) => Conversation(
@@ -108,5 +144,11 @@ class Conversation {
         lastActivity:
             DateTime.fromMillisecondsSinceEpoch((json['at'] as num).toInt()),
         ttlSecondes: (json['ttl'] as num?)?.toInt() ?? 0,
+        isChannel: json['channel'] as bool? ?? false,
+        channelAdminDevice: json['chAdmin'] as String?,
+        channelIsAdmin: json['chOwner'] as bool? ?? false,
+        channelLinkSecret: json['chSecret'] == null
+            ? null
+            : base64Decode(json['chSecret'] as String),
       );
 }

@@ -136,6 +136,12 @@ class ZiaCryptoEngine {
   Future<Uint8List> senderKeyDecrypt(String groupId, String senderId, Uint8List message) =>
       _call('senderKeyDecrypt', {'g': groupId, 's': senderId, 'm': message});
 
+  Future<Uint8List> channelSealKey(Uint8List linkSecret, Uint8List distribution) =>
+      _call('channelSealKey', {'l': linkSecret, 'd': distribution});
+
+  Future<Uint8List> channelOpenKey(Uint8List linkSecret, Uint8List sealed) =>
+      _call('channelOpenKey', {'l': linkSecret, 's': sealed});
+
   /// Ouvre une enveloppe scellée destinée à cet appareil.
   Future<Uint8List> sealedOpen(Uint8List sealed) =>
       _call('sealedOpen', {'s': sealed});
@@ -306,6 +312,10 @@ class ZiaCryptoEngine {
             a['g'] as String, a['s'] as String, a['m'] as Uint8List);
       case 'sealedOpen':
         return engine.sealedOpen(a['s'] as Uint8List);
+      case 'channelSealKey':
+        return engine.channelSealKey(a['l'] as Uint8List, a['d'] as Uint8List);
+      case 'channelOpenKey':
+        return engine.channelOpenKey(a['l'] as Uint8List, a['s'] as Uint8List);
       case 'appLockSet':
         engine.appLockSet(a['c'] as String);
         return null;

@@ -242,6 +242,16 @@ class ZiaBindings {
             int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
                 Pointer<Uint8>, int, Pointer<Pointer<Uint8>>,
                 Pointer<Size>)>('zia_sender_key_decrypt'),
+        channelSealKey = lib.lookupFunction<
+            Int32 Function(Pointer<Uint8>, Pointer<Uint8>, Size,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_channel_seal_key'),
+        channelOpenKey = lib.lookupFunction<
+            Int32 Function(Pointer<Uint8>, Pointer<Uint8>, Size,
+                Pointer<Pointer<Uint8>>, Pointer<Size>),
+            int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+                Pointer<Pointer<Uint8>>, Pointer<Size>)>('zia_channel_open_key'),
         appLockSet = lib.lookupFunction<
             Int32 Function(Pointer<ZiaEngine>, Pointer<Char>),
             int Function(Pointer<ZiaEngine>, Pointer<Char>)>('zia_app_lock_set'),
@@ -336,6 +346,14 @@ class ZiaBindings {
       Pointer<Pointer<Uint8>>, Pointer<Size>) senderKeyEncrypt;
   final int Function(Pointer<ZiaEngine>, Pointer<Char>, Pointer<Char>,
       Pointer<Uint8>, int, Pointer<Pointer<Uint8>>, Pointer<Size>) senderKeyDecrypt;
+
+  /// Canaux de diffusion : sceller / desceller la clé de LECTURE d'un canal
+  /// sous le secret du lien d'invitation. Sans état moteur — la clé de lien
+  /// (32 octets) est passée en premier argument.
+  final int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) channelSealKey;
+  final int Function(Pointer<Uint8>, Pointer<Uint8>, int,
+      Pointer<Pointer<Uint8>>, Pointer<Size>) channelOpenKey;
 
   /// Code de verrouillage de l'application (Argon2id côté moteur).
   final int Function(Pointer<ZiaEngine>, Pointer<Char>) appLockSet;
