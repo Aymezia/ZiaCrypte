@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/config/app_settings.dart';
 import '../../../core/theme/app_theme.dart';
@@ -14,6 +15,7 @@ import '../data/chat_service.dart';
 import 'identity_avatar.dart';
 import 'media_bubble.dart';
 import 'search_sheet.dart';
+import 'linked_text.dart';
 import 'verification_sheet.dart';
 import 'voice_message_bubble.dart';
 import 'voice_recorder_button.dart';
@@ -128,6 +130,69 @@ class _ChatScreenState extends State<ChatScreen> {
     } else if (!_nouveauEnBas) {
       // On lisait plus haut : on ne bouge pas, mais on signale le nouveau.
       setState(() => _nouveauEnBas = true);
+    }
+  }
+
+  /// Ouvre un lien après confirmation.
+  ///
+  /// La confirmation n'est pas une politesse : ouvrir un lien PRÉVIENT le site
+  /// visité — il apprend l'adresse IP et l'instant du clic. Dans une messagerie
+  /// qui s'échine à ne rien fuiter, ce départ vers l'extérieur mérite un accord
+  /// explicite, et l'adresse complète affichée pour repérer un leurre.
+  Future<void> _ouvrirLien(String url) async {
+    // Ponctuation de fin, souvent collée à l'URL dans une phrase, retirée.
+    var propre = url;
+    while (propre.isNotEmpty && '.,;:!?)]}»"\''.contains(propre[propre.length - 1])) {
+      propre = propre.substring(0, propre.length - 1);
+    }
+    final uri = Uri.tryParse(propre);
+    if (uri == null) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Ouvrir ce lien ?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SelectableText(propre,
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 10),
+            Text(
+              'Le site visité verra ton adresse IP et l’heure du clic. '
+              'Vérifie l’adresse avant d’ouvrir.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: propre));
+              Navigator.of(context).pop(false);
+            },
+            child: const Text('Copier'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Ouvrir'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Impossible d’ouvrir ce lien')),
+      );
     }
   }
 
@@ -1289,7 +1354,14 @@ class _ChatScreenState extends State<ChatScreen> {
                     mine: mien)
                 : _attachmentBubble(theme, m))
           else
-            Text(m.text, style: TextStyle(color: encre, height: 1.3)),
+            LinkedText(
+              text: m.text,
+              style: TextStyle(color: encre, height: 1.3),
+              // Lisible sur la bulle : sur mes messages (fond d'accent) l'encre
+              // claire souligne le lien ; sur les reçus, l'accent du thème.
+              linkColor: mien ? encre : theme.colorScheme.primary,
+              onTapLink: _ouvrirLien,
+            ),
           if (m.isEdited && !m.deletedForEveryone)
             Padding(
               padding: const EdgeInsets.only(top: 2),
@@ -1762,6 +1834,66 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
+  /// Écran d'accueil d'une conversation vide. Plutôt qu'une ligne grise, il
+  /// rassure sur ce qui distingue l'app — le chiffrement — et invite à écrire.
+  /// Le texte s'adapte : un canal sans post, un abonné en lecture seule et un
+  /// dialogue neuf n'attendent pas la même chose.
+  Widget _etatVide(ThemeData theme, Conversation conv) {
+    final (icone, titre, sous) = switch (conv) {
+      _ when conv.isChannel && conv.channelIsAdmin => (
+        Icons.campaign_outlined,
+        'Canal prêt',
+        'Publie ton premier message. Il partira chiffré à tes abonnés ; le '
+            'serveur ne verra que des octets.'
+      ),
+      _ when conv.isChannel => (
+        Icons.campaign_outlined,
+        'Aucune publication',
+        'Les messages de l’admin apparaîtront ici, déchiffrés sur ton appareil.'
+      ),
+      _ when conv.isGroup => (
+        Icons.lock_outline,
+        'Groupe chiffré',
+        'Les messages sont chiffrés de bout en bout. Le serveur ne connaît même '
+            'pas le nom du groupe.'
+      ),
+      _ => (
+        Icons.lock_outline,
+        'Conversation chiffrée de bout en bout',
+        'Écris le premier message. Personne d’autre que vous deux ne pourra le '
+            'lire — pas même le serveur.'
+      ),
+    };
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icone, size: 34, color: theme.colorScheme.primary),
+            ),
+            const SizedBox(height: 18),
+            Text(titre,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text(sous,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant, height: 1.4)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _messagesAndComposer(ThemeData theme, ChatService s) {
     final conv = s.active!;
     return Column(
@@ -1771,11 +1903,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _identityAlertBanner(theme, s),
         Expanded(
           child: conv.messages.isEmpty
-              ? Center(
-                  child: Text('Aucun message pour l’instant',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant)),
-                )
+              ? _etatVide(theme, conv)
               : Stack(
                   children: [
                     ListView.builder(
