@@ -1228,6 +1228,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _bulle(theme, m, memeAuteurAvant, memeAuteurApres),
+                      if (m.reactions.isNotEmpty) _reactions(theme, m),
                       // Le pied porte l'heure et l'état ; on le montre en fin de
                       // groupe, ou toujours pour un échec — un « réessayer »
                       // enfoui au milieu d'une salve ne se verrait pas.
@@ -1410,6 +1411,57 @@ class _ChatScreenState extends State<ChatScreen> {
       );
 
   /// Heure et statut de remise, sous le dernier message d'un groupe.
+  /// Puces de réactions sous une bulle : emoji + compte, mises en avant quand
+  /// j'ai réagi. Un tap bascule ma propre réaction.
+  Widget _reactions(ThemeData theme, ChatMessage m) {
+    final moi = widget.service.userId;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: [
+          for (final entree in m.reactions.entries)
+            if (entree.value.isNotEmpty)
+              _pucheReaction(theme, m, entree.key, entree.value.length,
+                  moi != null && entree.value.contains(moi)),
+        ],
+      ),
+    );
+  }
+
+  Widget _pucheReaction(
+      ThemeData theme, ChatMessage m, String emoji, int compte, bool mienne) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => widget.service.reagir(m, emoji),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: mienne
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: mienne
+              ? Border.all(color: theme.colorScheme.primary, width: 1)
+              : null,
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(emoji, style: const TextStyle(fontSize: 13)),
+          if (compte > 1) ...[
+            const SizedBox(width: 4),
+            Text('$compte',
+                style: theme.textTheme.labelSmall?.copyWith(
+                    color: mienne
+                        ? theme.colorScheme.onPrimaryContainer
+                        : theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ]),
+      ),
+    );
+  }
+
   Widget _piedDeMessage(ThemeData theme, ChatMessage m) {
     final couleur = theme.colorScheme.onSurfaceVariant;
 
@@ -1524,12 +1576,41 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Menu d'un message : répondre, copier.
   void _menuMessage(ChatMessage m) {
+    final conv = widget.service.active;
+    // Réactions : sur un vrai message (avec identifiant), hors canal — un
+    // abonné n'a pas de voie retour vers l'admin. Un message supprimé non plus.
+    final peutReagir = m.id != null &&
+        !m.deletedForEveryone &&
+        !(conv?.isChannel ?? false);
     showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (peutReagir)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    for (final emoji in ChatService.reactionsProposees)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          widget.service.reagir(m, emoji);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Text(emoji,
+                              style: const TextStyle(fontSize: 26)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            if (peutReagir) const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.reply),
               title: const Text('Répondre'),

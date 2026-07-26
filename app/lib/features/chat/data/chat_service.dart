@@ -1502,6 +1502,10 @@ class ChatService extends ChangeNotifier {
   static const _prefixeEdit = '__zia_edit__:';
   static const _prefixeSuppr = '__zia_del__:';
 
+  /// Réaction emoji à un message, par son identifiant. Voyage chiffrée, comme
+  /// l'édition ; le serveur ne voit qu'un blob. `on` distingue pose et retrait.
+  static const _prefixeReaction = '__zia_react__:';
+
   /// Accusé de lecture. Chiffré comme le reste : le serveur ne peut pas savoir
   /// que le message a été ouvert. Désactivé par défaut côté préférences.
   static const _prefixeLu = '__zia_read__:';
@@ -1579,6 +1583,7 @@ class ChatService extends ChangeNotifier {
     _prefixeJeton,
     _prefixeCleGroupe,
     _prefixeStatut,
+    _prefixeReaction,
   ];
 
   /// Encode l'annonce d'une photo de profil. Exposé aux tests : c'est la
@@ -1601,7 +1606,8 @@ class ChatService extends ChangeNotifier {
       t.startsWith(_prefixeTtl) ||
       t.startsWith(_prefixeJeton) ||
       t.startsWith(_prefixeCleGroupe) ||
-      t.startsWith(_prefixeStatut);
+      t.startsWith(_prefixeStatut) ||
+      t.startsWith(_prefixeReaction);
 
   /// Émission des accusés de lecture, pilotée par les préférences.
   bool accusesLectureActifs = false;
@@ -1912,8 +1918,34 @@ class ChatService extends ChangeNotifier {
   /// chiffrement lui-même.
   Future<void> _appliquerControle(
       Conversation conv, String texte, bool deMoi,
-      {String? expediteurDevice}) async {
+      {String? expediteurDevice, String? reacteurUserId}) async {
     try {
+      // Réaction emoji : posée ou retirée par n'importe qui, pas seulement
+      // l'auteur du message. On identifie le réacteur — moi, ou l'expéditeur du
+      // contrôle — pour compter et savoir qui a réagi.
+      if (texte.startsWith(_prefixeReaction)) {
+        final json = jsonDecode(texte.substring(_prefixeReaction.length))
+            as Map<String, dynamic>;
+        final cible = json['id'] as String?;
+        final emoji = json['e'] as String?;
+        final pose = json['on'] as bool? ?? true;
+        final qui = deMoi ? userId : reacteurUserId;
+        if (cible == null || emoji == null || qui == null) return;
+        for (final m in conv.messages) {
+          if (m.id != cible) continue;
+          final set = m.reactions.putIfAbsent(emoji, () => <String>{});
+          if (pose) {
+            set.add(qui);
+          } else {
+            set.remove(qui);
+            if (set.isEmpty) m.reactions.remove(emoji);
+          }
+          await _saveHistory(conv);
+          notifyListeners();
+          return;
+        }
+        return;
+      }
       // Distribution d'une clé d'expéditeur de groupe.
       //
       // L'émetteur est celui du TRANSPORT — la session pair-à-pair qui a porté
@@ -2288,6 +2320,38 @@ class ChatService extends ChangeNotifier {
   }
 
   Future<void> send(String text) => _sendPayload(text, null);
+
+  /// Emoji proposés à la réaction. Peu nombreux à dessein : un clavier emoji
+  /// complet transforme un geste d'un tap en une recherche.
+  static const reactionsProposees = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  /// Pose ou retire une réaction sur un message (bascule).
+  ///
+  /// Appliquée tout de suite localement, puis diffusée dans le canal chiffré.
+  /// Indisponible sur un canal : un abonné n'a pas de session retour vers
+  /// l'admin, une réaction n'aurait nulle part où aller.
+  Future<void> reagir(ChatMessage m, String emoji) async {
+    final conv = active;
+    final moi = userId;
+    if (conv == null || moi == null || m.id == null) return;
+    if (conv.isChannel) return;
+
+    final set = m.reactions.putIfAbsent(emoji, () => <String>{});
+    final pose = !set.contains(moi); // pas encore réagi → on pose
+    if (pose) {
+      set.add(moi);
+    } else {
+      set.remove(moi);
+      if (set.isEmpty) m.reactions.remove(emoji);
+    }
+    notifyListeners();
+    await _saveHistory(conv);
+
+    await _diffuserControle(
+      conv,
+      '$_prefixeReaction${jsonEncode({'id': m.id, 'e': emoji, 'on': pose})}',
+    );
+  }
 
   /// Réémet un message dont l'envoi avait totalement échoué. On retire la bulle
   /// ratée et on relance l'envoi de son contenu : en cas de nouveau succès,
@@ -2940,7 +3004,8 @@ class ChatService extends ChangeNotifier {
         // Message de contrôle : édition ou suppression d'un message existant.
         if (_estControle(payload.text)) {
           await _appliquerControle(conv, payload.text, fromMyself,
-              expediteurDevice: sender);
+              expediteurDevice: sender,
+              reacteurUserId: m['senderUserId'] as String?);
           continue;
         }
 

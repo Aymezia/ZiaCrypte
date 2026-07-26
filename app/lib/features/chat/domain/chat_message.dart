@@ -22,7 +22,8 @@ class ChatMessage {
     this.expiresAt,
     this.author,
     this.sendFailed = false,
-  });
+    Map<String, Set<String>>? reactions,
+  }) : reactions = reactions ?? {};
 
   /// Instant après lequel ce message doit disparaître, si la conversation a
   /// une durée de vie active. Calculé à l'arrivée du message et conservé avec
@@ -49,6 +50,12 @@ class ChatMessage {
   /// un redémarrage — au retour, on repart d'un état propre plutôt que de
   /// promettre un renvoi qu'on ne relancera pas tout seul.
   bool sendFailed;
+
+  /// Réactions au message : emoji → ensemble des identifiants de compte l'ayant
+  /// posée. L'ensemble sert au compte affiché ET à savoir si J'AI réagi (mon
+  /// propre identifiant y figure-t-il). Comme tout le reste, une réaction
+  /// voyage dans le canal chiffré — le serveur ne voit qu'un blob.
+  final Map<String, Set<String>> reactions;
 
   /// Message envoyé, confirmé lu par le correspondant (si celui-ci a activé
   /// les accusés de lecture — ils sont facultatifs des deux côtés).
@@ -123,6 +130,8 @@ class ChatMessage {
         if (readAckSent) 'la': true,
         if (systeme) 'sys': true,
         if (author != null) 'au': author,
+        if (reactions.isNotEmpty)
+          'rx': reactions.map((e, s) => MapEntry(e, s.toList())),
         if (expiresAt != null) 'exp': expiresAt!.millisecondsSinceEpoch,
       };
 
@@ -148,6 +157,9 @@ class ChatMessage {
         readAckSent: json['la'] as bool? ?? false,
         systeme: json['sys'] as bool? ?? false,
         author: json['au'] as String?,
+        reactions: (json['rx'] as Map?)?.map((e, v) =>
+                MapEntry(e as String, (v as List).cast<String>().toSet())) ??
+            {},
         expiresAt: json['exp'] == null
             ? null
             : DateTime.fromMillisecondsSinceEpoch((json['exp'] as num).toInt()),

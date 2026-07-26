@@ -216,6 +216,23 @@ void main() {
       bob.openConversation(convBob.id);
       expect(convBob.unread, equals(0),
           reason: 'ouvrir la conversation doit remettre les non-lus à zéro');
+
+      // Réactions : Bob réagit, la réaction voyage chiffrée et Alice la voit sur
+      // SON message. Puis Bob la retire, et elle disparaît chez Alice.
+      await bob.reagir(message, '👍');
+      final vue = await _attendre(() => alice.conversations
+          .expand((c) => c.messages)
+          .any((m) =>
+              m.text == 'bonjour le groupe' &&
+              m.mine &&
+              (m.reactions['👍']?.contains(bob.userId) ?? false)));
+      expect(vue, isTrue, reason: 'Alice ne voit pas la réaction de Bob');
+
+      await bob.reagir(message, '👍'); // bascule : retrait
+      final retiree = await _attendre(() => alice.conversations
+          .expand((c) => c.messages)
+          .every((m) => !(m.reactions['👍']?.contains(bob.userId) ?? false)));
+      expect(retiree, isTrue, reason: 'le retrait de la réaction ne se propage pas');
     }, timeout: const Timeout(Duration(minutes: 2)));
   });
 }
