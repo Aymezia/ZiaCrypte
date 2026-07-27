@@ -1970,6 +1970,35 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
 
+  /// Identifiants des messages déjà animés à l'entrée, pour ne pas rejouer
+  /// l'animation quand la bulle est reconstruite (défilement, nouveau message).
+  final Set<String> _messagesAnimes = {};
+
+  /// Anime l'apparition d'un message — mais seulement le DERNIER, et seulement
+  /// s'il vient d'arriver. Deux garde-fous : l'historique chargé à l'ouverture
+  /// a des horodatages anciens (pas d'animation en cascade), et l'ensemble des
+  /// déjà-animés évite le rejeu au défilement.
+  Widget _animerEntree(Widget child, ChatMessage m, {required bool dernier}) {
+    final id = m.id;
+    if (!dernier ||
+        id == null ||
+        _messagesAnimes.contains(id) ||
+        DateTime.now().difference(m.at).inMilliseconds > 1500) {
+      return child;
+    }
+    _messagesAnimes.add(id);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      builder: (context, t, enfant) => Opacity(
+        opacity: t,
+        child: Transform.translate(offset: Offset(0, (1 - t) * 10), child: enfant),
+      ),
+      child: child,
+    );
+  }
+
   /// Bouton flottant « revenir en bas du fil ».
   ///
   /// Un point d'accent quand un message est arrivé pendant qu'on lisait plus
@@ -2078,7 +2107,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         final suivant = i + 1 < conv.messages.length
                             ? conv.messages[i + 1]
                             : null;
-                        return _ligneMessage(theme, conv, m, precedent, suivant);
+                        final ligne =
+                            _ligneMessage(theme, conv, m, precedent, suivant);
+                        return _animerEntree(ligne, m, dernier: suivant == null);
                       },
                     ),
                     // Bouton « revenir en bas », visible seulement quand on a

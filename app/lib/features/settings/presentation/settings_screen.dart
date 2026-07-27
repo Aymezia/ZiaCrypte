@@ -237,6 +237,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(title: const Text('Options')),
       body: ListView(
         children: [
+          _profilHeader(theme, s),
+          const Divider(height: 32),
           _section(theme, 'Apparence'),
           ListenableBuilder(
             listenable: widget.settings,
@@ -313,41 +315,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const Divider(height: 32),
           _section(theme, 'Compte'),
-          // Écoute le service : sans ça, la photo qu'on vient de choisir ne
-          // s'affiche qu'au prochain passage sur cet écran — on croit que
-          // l'enregistrement a échoué alors qu'il a réussi.
-          ListenableBuilder(
-            listenable: s,
-            builder: (context, _) => ListTile(
-              leading: IdentityAvatar(
-                label: s.username ?? '?',
-                photo: s.photoDe(s.userId),
-                size: 40,
-              ),
-              title: const Text('Photo de profil'),
-              subtitle: Text(s.busy
-                  ? 'Chiffrement et envoi…'
-                  : 'Chiffrée comme un message : le serveur ne la voit pas'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: s.busy ? null : _choisirPhoto,
-            ),
-          ),
-          ListenableBuilder(
-            listenable: s,
-            builder: (context, _) => ListTile(
-              leading: const Icon(Icons.mood_outlined),
-              title: const Text('Statut'),
-              subtitle: Text(s.statutDe(s.userId) ??
-                  'Aucun — chiffré comme un message, jamais lu par le serveur'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _modifierStatut,
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.person_outline),
-            title: const Text('Nom d’utilisateur'),
-            subtitle: Text(s.username ?? '—'),
-          ),
+          // Avatar et statut sont désormais dans l'en-tête, en haut : on ne
+          // garde ici que les informations, non modifiables.
           ListTile(
             leading: const Icon(Icons.devices_outlined),
             title: const Text('Cet appareil'),
@@ -517,6 +486,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  /// En-tête de profil : l'identité en évidence plutôt qu'enfouie dans des
+  /// tuiles. Grand avatar (un tap le change), pseudo, statut éditable. Écoute
+  /// le service pour se rafraîchir dès qu'une photo ou un statut change.
+  Widget _profilHeader(ThemeData theme, ChatService s) => ListenableBuilder(
+        listenable: s,
+        builder: (context, _) {
+          final statut = s.statutDe(s.userId);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+            child: Column(
+              children: [
+                // Avatar + pastille appareil-photo, tappable.
+                Semantics(
+                  button: true,
+                  label: 'Changer la photo de profil',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(48),
+                    onTap: s.busy ? null : _choisirPhoto,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        IdentityAvatar(
+                          label: s.username ?? '?',
+                          photo: s.photoDe(s.userId),
+                          size: 84,
+                        ),
+                        Positioned(
+                          right: -2,
+                          bottom: -2,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: theme.colorScheme.surface, width: 2),
+                            ),
+                            child: Icon(
+                              s.busy ? Icons.hourglass_top : Icons.photo_camera,
+                              size: 15,
+                              color: theme.colorScheme.onPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(s.username ?? '—',
+                    style: theme.textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 4),
+                // Statut : éditable d'un tap. Un libellé d'invite quand il est
+                // vide, pour qu'on sache qu'on peut en mettre un.
+                InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: _modifierStatut,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.mood_outlined,
+                            size: 15, color: theme.colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            statut ?? 'Ajouter un statut',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: statut == null
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(Icons.edit_outlined,
+                            size: 13, color: theme.colorScheme.onSurfaceVariant),
+                      ],
+                    ),
+                  ),
+                ),
+                // Le chiffrement reste dit, mais discrètement, une fois.
+                const SizedBox(height: 6),
+                Text('Photo et statut chiffrés — le serveur ne les voit pas',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant)),
+              ],
+            ),
+          );
+        },
+      );
 
   Widget _section(ThemeData theme, String titre) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
