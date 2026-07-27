@@ -1,11 +1,21 @@
 import type { Server } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { verifyAccess } from '../lib/tokens.js';
+import { prisma } from '../db/prisma.js';
+import { estBloque } from '../modules/blocks/blocks.routes.js';
+import { pushService } from '../modules/push/push.service.js';
 import {
   appareilsDeDeuxComptes,
   autoriserObservation,
   MAX_ABONNEMENTS,
 } from './presence.js';
+
+/** Étapes de signalisation d'un appel, relayées en clair pour l'AIGUILLAGE —
+ *  jamais le contenu (SDP/ICE), qui voyage chiffré dans `payload`. */
+const KINDS_APPEL = new Set(['invite', 'offer', 'answer', 'ice', 'hangup', 'decline']);
+/** Un blob de signalisation chiffré (SDP/ICE) reste petit, surtout en
+ *  relais-seul. On borne pour qu'il ne serve pas de canal de contournement. */
+const MAX_PAYLOAD_APPEL = 16 * 1024;
 
 /**
  * Gateway temps réel.
@@ -122,9 +132,102 @@ export class RealtimeGateway {
       case 'presence.subscribe':
         void this.abonnerPresence(socket, message);
         return;
+      case 'call.signal':
+        void this.relayerAppel(socket, message);
+        return;
       default:
         return;
     }
+  }
+
+  /**
+   * Relaie une étape de signalisation d'appel entre appareils.
+   *
+   * ## Ce que le serveur voit, et ce qu'il ne voit pas
+   *
+   * Il aiguille : il connaît l'appareil appelant, l'appareil appelé, et le
+   * TYPE d'étape (invitation, réponse, raccroché…). Il ne voit RIEN du contenu :
+   * l'offre et la réponse WebRTC (SDP), les candidats ICE, l'empreinte DTLS
+   * voyagent chiffrés de bout en bout dans `payload`, opaque pour lui. Il ne
+   * peut donc ni écouter l'appel, ni s'intercaler dans le chiffrement du média.
+   *
+   * Rien n'est persisté : un signal d'appel arrivé en retard n'a aucun sens.
+   * Le seul cas où l'on va plus loin qu'un relais direct est l'INVITATION vers
+   * un appareil endormi : on tente un réveil push pour qu'il sonne.
+   */
+  private async relayerAppel(socket: WebSocket, message: Record<string, unknown>) {
+    const titulaire = this.titulaires.get(socket);
+    if (!titulaire) return;
+
+    const kind = message.kind;
+    const callId = message.callId;
+    const payload = message.payload;
+    if (
+      typeof kind !== 'string' ||
+      !KINDS_APPEL.has(kind) ||
+      typeof callId !== 'string' ||
+      typeof payload !== 'string' ||
+      payload.length > MAX_PAYLOAD_APPEL
+    ) {
+      return;
+    }
+    const cibles = Array.isArray(message.to)
+      ? (message.to as unknown[]).filter((d): d is string => typeof d === 'string').slice(0, 10)
+      : [];
+    if (cibles.length === 0) return;
+
+    const charge = JSON.stringify({
+      type: 'call.signal',
+      from: titulaire.deviceId,
+      callId,
+      kind,
+      payload,
+    });
+
+    // Une invitation peut faire SONNER un appareil : c'est le seul signal qu'on
+    // pousse hors ligne, et le seul qu'on refuse à travers un blocage — sinon
+    // le harcèlement par sonnerie serait trivial. Les autres étapes ne valent
+    // que pour un appel déjà en cours, donc seulement vers un appareil connecté.
+    const estInvitation = kind === 'invite';
+    for (const cible of cibles) {
+      if (estInvitation && (await this.bloquePourAppel(titulaire.userId, cible))) {
+        continue; // silencieux : l'appelant ne doit pas déduire le blocage
+      }
+      const remis = this.envoyerA(cible, charge);
+      if (!remis && estInvitation) {
+        void pushService?.wakeDevice(cible);
+      }
+    }
+  }
+
+  /** Le titulaire de `deviceCible` a-t-il bloqué l'appelant ? */
+  private async bloquePourAppel(appelantUserId: string, deviceCible: string): Promise<boolean> {
+    try {
+      const device = await prisma.device.findUnique({
+        where: { id: deviceCible },
+        select: { userId: true },
+      });
+      if (!device) return true; // appareil inconnu : rien à relayer
+      if (device.userId === appelantUserId) return false; // ses propres appareils
+      return estBloque(appelantUserId, device.userId);
+    } catch {
+      return false; // en cas de doute, on ne bloque pas un appel légitime
+    }
+  }
+
+  /** Envoie une charge à toutes les sockets ouvertes d'un appareil.
+   *  Renvoie true si au moins une l'a reçue. */
+  private envoyerA(deviceId: string, charge: string): boolean {
+    const sockets = this.byDevice.get(deviceId);
+    if (!sockets) return false;
+    let remis = false;
+    for (const s of sockets) {
+      if (s.readyState === WebSocket.OPEN) {
+        s.send(charge);
+        remis = true;
+      }
+    }
+    return remis;
   }
 
   /**
