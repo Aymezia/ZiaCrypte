@@ -1,6 +1,6 @@
-# ZiaCrypte v0.13.0 — polish across the app
+# ZiaCrypte v0.14.0 — encrypted voice calls
 
-An interface pass: the entry screen, the profile, the channels, and the small motion that makes a conversation feel alive.
+You can now call the people you talk to — and the call is end-to-end encrypted, like everything else here.
 
 ## Downloads
 
@@ -14,27 +14,26 @@ An interface pass: the entry screen, the profile, the channels, and the small mo
 
 Every asset is signed, and the application verifies the signature before installing an update.
 
-## Sign-in screen
+## Voice calls
 
-- **Show/hide the password.** No more typing blind — the eye reveals it, the top cause of failed sign-ins on mobile.
-- **A password-strength gauge** when creating an account, guiding toward something solid without ever blocking you.
-- The first field gets focus automatically: the username when creating, the password when returning.
+A phone button in any direct conversation starts a call. When it connects, an in-call screen shows who you're talking to, a mute button, and hang up. An incoming call takes over the whole screen so you can't miss it.
 
-## Profile
+What makes it ours:
 
-The settings screen opens on a real **profile header** now — a large avatar you tap to change, your username, and a status you edit in one tap — instead of the same things scattered as rows down a flat list. Photo and status stay encrypted; the server never sees them.
+- **The audio is end-to-end encrypted** (WebRTC's DTLS-SRTP), between the two devices. The server can't listen.
+- **No one learns the other's IP.** Calls are relayed through a TURN server, always — so the two ends never see each other's address. The relay carries the encrypted audio but cannot open it.
+- **No one can wedge into the call.** The WebRTC handshake fingerprint travels inside our own encrypted, authenticated channel (the Double Ratchet). A server that tried to substitute it would be caught — there's no man in the middle.
 
-## Channels
+Calls work between people who already have a conversation. Group calls aren't here yet; this is one-to-one.
 
-- The header shows the **subscriber count**.
-- Admins get **"Renew the key"**, which is what actually removes someone: it mints a fresh read key and retires the old invite link, so anyone you unsubscribed can no longer read. The trade-off is stated up front — you re-share the new link with those who stay, since with channels the link *is* the key.
+## For the operator
 
-## A little motion
-
-New messages now **fade and slide in**. Deliberately restrained: only the latest message animates, and only when it has just arrived — the history you scroll through never flickers.
+Voice calls need a **TURN relay** (coturn) running alongside the server — see [`docs/appels-turn.md`](docs/appels-turn.md) for the deployment steps. Until it's up, the call button politely says calls aren't available; nothing else is affected. On iOS, ringing while the app is closed still waits on APNs (not yet implemented); Android rings via the existing push wake.
 
 ## Verified by actually running it
 
-- Flutter suite **46 passed**
-- Two-client integration against a dedicated server, all passed — including a new check that renewing a channel's key locks out the old invite link
-- Crypto engine suites **8/8**, and again under ASan + UBSan
+- Two-client integration against a dedicated server: call signaling — ring, accept, hang up — travels encrypted and drives the call state end to end
+- Server suite against a real PostgreSQL: **68 passed**, including the TURN-credential endpoint (short-lived HMAC credentials) and the signaling relay (opaque, block-aware)
+- Flutter suite **46 passed**; crypto engine **8/8**, and again under ASan + UBSan
+
+The download is larger than before (the WebRTC media library is bundled).
