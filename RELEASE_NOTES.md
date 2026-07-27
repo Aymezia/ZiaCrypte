@@ -1,6 +1,6 @@
-# ZiaCrypte v0.12.1 — three fixes
+# ZiaCrypte v0.13.0 — polish across the app
 
-A small patch over v0.12.0, fixing three bugs — one of them affecting everyone.
+An interface pass: the entry screen, the profile, the channels, and the small motion that makes a conversation feel alive.
 
 ## Downloads
 
@@ -14,13 +14,27 @@ A small patch over v0.12.0, fixing three bugs — one of them affecting everyone
 
 Every asset is signed, and the application verifies the signature before installing an update.
 
-## Fixes
+## Sign-in screen
 
-- **No more disconnects after 15 minutes.** The access token expires every 15 minutes, and the app never used the refresh token to renew it — so past that point it looked disconnected, every request failing while the session was still valid. It now renews the token automatically and transparently on the first expired request.
-- **A missing file no longer crashes the app.** Sending a voice message whose recording didn't complete (microphone denied, for instance), or an attachment that had moved, read a file that wasn't there and threw an uncaught error — the red screen. It now shows a message and cancels the send.
-- **The message thread no longer errors when you scroll up.** A new message arriving while you were reading older ones could trigger an internal error. Fixed.
+- **Show/hide the password.** No more typing blind — the eye reveals it, the top cause of failed sign-ins on mobile.
+- **A password-strength gauge** when creating an account, guiding toward something solid without ever blocking you.
+- The first field gets focus automatically: the username when creating, the password when returning.
+
+## Profile
+
+The settings screen opens on a real **profile header** now — a large avatar you tap to change, your username, and a status you edit in one tap — instead of the same things scattered as rows down a flat list. Photo and status stay encrypted; the server never sees them.
+
+## Channels
+
+- The header shows the **subscriber count**.
+- Admins get **"Renew the key"**, which is what actually removes someone: it mints a fresh read key and retires the old invite link, so anyone you unsubscribed can no longer read. The trade-off is stated up front — you re-share the new link with those who stay, since with channels the link *is* the key.
+
+## A little motion
+
+New messages now **fade and slide in**. Deliberately restrained: only the latest message animates, and only when it has just arrived — the history you scroll through never flickers.
 
 ## Verified by actually running it
 
 - Flutter suite **46 passed**
-- Two-client integration against a dedicated server, all passed — including a new check that an expired access token is renewed and the request still succeeds, and that a failed send stays and can be retried
+- Two-client integration against a dedicated server, all passed — including a new check that renewing a channel's key locks out the old invite link
+- Crypto engine suites **8/8**, and again under ASan + UBSan
