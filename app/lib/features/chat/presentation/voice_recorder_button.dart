@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -111,14 +112,29 @@ class _VoiceRecorderButtonState extends State<VoiceRecorderButton> {
 
   Future<void> _stop() async {
     _ticker?.cancel();
-    final path = await _recorder.stop();
+    // stop() peut lever si l'enregistrement n'a pas abouti (permission retirée
+    // en cours, stockage plein) : sans ce garde, l'exception remontait non
+    // capturée et affichait l'écran d'erreur rouge.
+    String? path;
+    try {
+      path = await _recorder.stop();
+    } catch (_) {
+      if (mounted) setState(() => _recording = false);
+      _snack('Enregistrement interrompu — rien à envoyer.');
+      return;
+    }
     final durationMs = _startedAt == null
         ? 0
         : DateTime.now().difference(_startedAt!).inMilliseconds;
-    setState(() => _recording = false);
+    if (mounted) setState(() => _recording = false);
     // Ignore un appui trop bref : rien d'exploitable en dessous d'une seconde.
-    if (path != null && durationMs >= 800) {
+    if (path == null || durationMs < 800) return;
+    // Le plugin peut renvoyer un chemin SANS fichier : on vérifie avant de le
+    // confier à l'envoi, plutôt que de laisser la lecture échouer plus loin.
+    if (await File(path).exists()) {
       widget.onRecorded(path, durationMs);
+    } else {
+      _snack('Enregistrement introuvable — rien à envoyer.');
     }
   }
 
