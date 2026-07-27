@@ -881,6 +881,7 @@ class _ChatScreenState extends State<ChatScreen> {
             automaticallyImplyLeading: false,
             title: _conversationTitle(theme, s),
             actions: [
+              _boutonAppel(theme, s),
               if (!(s.active?.isChannel ?? false)) _boutonEphemere(theme, s),
               _menuConversation(theme, s),
             ],

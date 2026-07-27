@@ -1536,6 +1536,11 @@ class ChatService extends ChangeNotifier {
   /// Offre reçue avec une invitation, en attente d'acceptation.
   Map<String, dynamic>? _offreEntrante;
 
+  /// Candidats ICE reçus AVANT que notre session média existe. En relais-seul,
+  /// il n'y en a qu'un ou deux, et les perdre suffit à empêcher la connexion.
+  /// On les met de côté et on les rejoue dès la session créée.
+  final List<Map<String, dynamic>> _iceEnAttente = [];
+
   /// Micro coupé, et média réellement connecté — pour l'interface d'appel.
   bool callMuet = false;
   bool callMediaConnecte = false;
@@ -1575,8 +1580,17 @@ class ChatService extends ChangeNotifier {
     final api = _api;
     if (api == null || conv.isGroup || conv.isChannel || enAppel) return;
     // Un relais est nécessaire (on force le relais pour cacher les IP) : sans
-    // TURN configuré côté serveur, l'appel ne peut pas aboutir.
-    final creds = await api.turnCredentials();
+    // TURN configuré côté serveur, l'appel ne peut pas aboutir. Toute erreur
+    // ici (réseau, jeton) doit se voir : sans ce garde, un échec de la requête
+    // faisait échouer l'appel EN SILENCE — rien ne se passait au clic.
+    final Map<String, dynamic>? creds;
+    try {
+      creds = await api.turnCredentials();
+    } catch (e) {
+      error = 'Impossible de démarrer l’appel : ${_humanize(e)}';
+      notifyListeners();
+      return;
+    }
     if (creds == null) {
       error = 'Les appels ne sont pas disponibles sur ce serveur.';
       notifyListeners();
@@ -1633,6 +1647,13 @@ class ChatService extends ChangeNotifier {
         final session = _creerSessionMedia(conv, device, id);
         data = await session.repondre(offre);
         _callSession = session;
+        // Session prête : on rejoue les candidats ICE arrivés en avance.
+        for (final c in _iceEnAttente) {
+          try {
+            await session.ajouterCandidat(c);
+          } catch (_) {}
+        }
+        _iceEnAttente.clear();
       } catch (e) {
         error = 'Micro indisponible : appel sans audio. (${_humanize(e)})';
       }
@@ -1664,6 +1685,7 @@ class ChatService extends ChangeNotifier {
     callPairDevice = null;
     callIceServers = null;
     _offreEntrante = null;
+    _iceEnAttente.clear();
     callMuet = false;
     callMediaConnecte = false;
     notifyListeners();
@@ -1767,10 +1789,15 @@ class ChatService extends ChangeNotifier {
           }
         }
       case 'ice':
-        // Candidat ICE du correspondant : à donner à WebRTC.
-        if (callId == id && data['candidate'] != null) {
+        // Candidat ICE du correspondant. Si notre session n'existe pas encore
+        // (invitation pas encore acceptée), on le met de côté au lieu de le
+        // perdre — sinon la connexion échoue faute de candidat relais.
+        if (callId != id || data['candidate'] == null) break;
+        if (_callSession == null) {
+          _iceEnAttente.add(data);
+        } else {
           try {
-            await _callSession?.ajouterCandidat(data);
+            await _callSession!.ajouterCandidat(data);
           } catch (_) {}
         }
     }
