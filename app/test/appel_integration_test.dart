@@ -60,6 +60,10 @@ void main() {
       if (!moteurDispo || !_dedie || !pret) return;
       alice = ChatService();
       bob = ChatService();
+      // WebRTC exige un binding natif absent d'un `flutter test` : on n'éprouve
+      // ici que la SIGNALISATION. Le média se vérifie sur appareil.
+      alice.activerMediaAppel = false;
+      bob.activerMediaAppel = false;
     });
 
     test('sonnerie, acceptation, raccroché — le tout chiffré', () async {

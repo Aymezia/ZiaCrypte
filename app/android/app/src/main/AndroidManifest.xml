@@ -4,6 +4,7 @@
     <!-- Enregistrement des messages vocaux. Demandée à l'exécution par le
          paquet record ; sans cette déclaration, l'enregistrement échoue. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <!-- Mise à jour depuis GitHub. Cette permission ne fait qu'autoriser
          l'application à PROPOSER un APK à l'installateur du système : Android
          affiche ensuite sa propre confirmation, qu'aucune application ne peut

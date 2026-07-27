@@ -15,6 +15,7 @@ import '../domain/chat_message.dart';
 import '../domain/conversation.dart';
 import '../domain/contact_identity.dart';
 import '../domain/crypto_models.dart';
+import 'call_session.dart';
 import 'identity_pinning.dart';
 import 'envelope.dart';
 import 'ffi_crypto_gateway.dart';
@@ -1526,10 +1527,48 @@ class ChatService extends ChangeNotifier {
   /// invité, ou celui qui a répondu). C'est par sa session qu'on chiffre.
   String? callPairDevice;
 
-  /// Credentials TURN du dernier appel, transmis à WebRTC en phase 3b.
+  /// Credentials TURN du dernier appel.
   List<dynamic>? callIceServers;
 
+  /// Session média WebRTC de l'appel courant (null hors appel).
+  CallSession? _callSession;
+
+  /// Offre reçue avec une invitation, en attente d'acceptation.
+  Map<String, dynamic>? _offreEntrante;
+
+  /// Micro coupé, et média réellement connecté — pour l'interface d'appel.
+  bool callMuet = false;
+  bool callMediaConnecte = false;
+
+  /// Active la couche média WebRTC. Désactivable par les tests : WebRTC exige un
+  /// binding natif absent d'un `flutter test`, où seule la SIGNALISATION est
+  /// éprouvée. En production, toujours vrai.
+  @visibleForTesting
+  bool activerMediaAppel = true;
+
   bool get enAppel => callEtat != CallEtat.aucun;
+
+  /// Coupe ou rétablit le micro pendant un appel.
+  void basculerMuet() {
+    final s = _callSession;
+    if (s == null) return;
+    callMuet = s.basculerMuet();
+    notifyListeners();
+  }
+
+  /// Crée la session média et branche l'émission de ses signaux (candidats ICE)
+  /// sur le canal chiffré, vers l'appareil pair.
+  CallSession _creerSessionMedia(Conversation conv, String device, String id) {
+    return CallSession(
+      iceServers: callIceServers ?? const [],
+      onSignal: (kind, data) =>
+          unawaited(_envoyerSignalAppel(conv, device, id, kind, data)),
+      onConnecte: (c) {
+        callMediaConnecte = c;
+        notifyListeners();
+      },
+    );
+  }
 
   /// Démarre un appel vers le correspondant d'une conversation directe.
   Future<void> appeler(Conversation conv) async {
@@ -1553,12 +1592,27 @@ class ChatService extends ChangeNotifier {
         .where((d) => !conv.ownDeviceIds.contains(d))
         .toList();
     callPairDevice = cibles.isNotEmpty ? cibles.first : null;
-    notifyListeners();
-    // L'invitation ne porte pas encore de SDP : le média WebRTC arrive en 3b.
-    // On transmet un marqueur, suffisant pour faire sonner et éprouver le canal.
-    for (final device in cibles) {
-      await _envoyerSignalAppel(conv, device, id, 'invite', {'v': 1});
+    final device = callPairDevice;
+    if (device == null) {
+      _terminerAppel();
+      return;
     }
+    notifyListeners();
+
+    // Prépare le média et joint l'OFFRE à l'invitation. Best-effort : si le
+    // micro est indisponible (permission, environnement sans audio), l'invite
+    // part quand même — la signalisation fonctionne, seul le son manque.
+    var data = <String, Object?>{'v': 1};
+    if (activerMediaAppel) {
+      try {
+        final session = _creerSessionMedia(conv, device, id);
+        data = await session.creerOffre();
+        _callSession = session;
+      } catch (e) {
+        error = 'Micro indisponible : appel sans audio. (${_humanize(e)})';
+      }
+    }
+    await _envoyerSignalAppel(conv, device, id, 'invite', data);
   }
 
   /// Accepte l'appel entrant.
@@ -1570,7 +1624,20 @@ class ChatService extends ChangeNotifier {
     if (conv == null) return;
     callEtat = CallEtat.connecte;
     notifyListeners();
-    await _envoyerSignalAppel(conv, device, id, 'answer', {'v': 1});
+
+    // Répond au média avec la réponse WebRTC, si une offre a été reçue.
+    var data = <String, Object?>{'v': 1};
+    final offre = _offreEntrante;
+    if (activerMediaAppel && offre != null && offre['sdp'] != null) {
+      try {
+        final session = _creerSessionMedia(conv, device, id);
+        data = await session.repondre(offre);
+        _callSession = session;
+      } catch (e) {
+        error = 'Micro indisponible : appel sans audio. (${_humanize(e)})';
+      }
+    }
+    await _envoyerSignalAppel(conv, device, id, 'answer', data);
   }
 
   /// Refuse un appel entrant, ou raccroche un appel en cours / sortant.
@@ -1588,11 +1655,17 @@ class ChatService extends ChangeNotifier {
   }
 
   void _terminerAppel() {
+    final s = _callSession;
+    _callSession = null;
+    if (s != null) unawaited(s.fermer());
     callEtat = CallEtat.aucun;
     callId = null;
     callPeerName = null;
     callPairDevice = null;
     callIceServers = null;
+    _offreEntrante = null;
+    callMuet = false;
+    callMediaConnecte = false;
     notifyListeners();
   }
 
@@ -1648,8 +1721,9 @@ class ChatService extends ChangeNotifier {
     final conv = _convPourDevice(from);
     if (conv == null) return;
 
-    // Déchiffre le SDP/ICE. On ne s'en sert pas encore (WebRTC en 3b), mais le
-    // déchiffrement PROUVE l'authenticité : un faux signal du serveur échouerait.
+    // Déchiffre le SDP/ICE. Le déchiffrement PROUVE l'authenticité : un faux
+    // signal forgé par le serveur échouerait ici, faute de la session.
+    Map<String, dynamic> data;
     try {
       final brut = base64Decode(frame['payload'] as String);
       final hlen = (brut[0] << 8) | brut[1];
@@ -1661,7 +1735,8 @@ class ChatService extends ChangeNotifier {
       }
       final sessionId = conv.sessions[from];
       if (sessionId == null) return;
-      await gateway.decrypt(sessionId, unpacked.ratchetHeader, chiffre);
+      final clair = await gateway.decrypt(sessionId, unpacked.ratchetHeader, chiffre);
+      data = jsonDecode(utf8.decode(clair)) as Map<String, dynamic>;
     } catch (_) {
       return; // signal illisible ou forgé : ignoré
     }
@@ -1673,6 +1748,8 @@ class ChatService extends ChangeNotifier {
           await _envoyerSignalAppel(conv, from, id, 'decline', const {});
           return;
         }
+        // On retient l'offre WebRTC (si présente) jusqu'à l'acceptation.
+        _offreEntrante = data;
         callId = id;
         callPairDevice = from;
         callPeerName = conv.peerUsername;
@@ -1682,10 +1759,20 @@ class ChatService extends ChangeNotifier {
         if (callId == id && callEtat == CallEtat.sortant) {
           callEtat = CallEtat.connecte;
           notifyListeners();
+          // L'appelant applique la réponse média de l'appelé.
+          if (data['sdp'] != null) {
+            try {
+              await _callSession?.appliquerReponse(data);
+            } catch (_) {}
+          }
         }
       case 'ice':
-        // Candidats ICE : consommés par WebRTC en 3b.
-        break;
+        // Candidat ICE du correspondant : à donner à WebRTC.
+        if (callId == id && data['candidate'] != null) {
+          try {
+            await _callSession?.ajouterCandidat(data);
+          } catch (_) {}
+        }
     }
   }
 
@@ -3300,11 +3387,11 @@ class ChatService extends ChangeNotifier {
           text: payload.text,
           mine: fromMyself,
           at: DateTime.now(),
-          // En groupe, on retient le pseudo de l'auteur pour l'afficher : à
-          // plusieurs, savoir qui écrit est essentiel. En direct, inutile.
-          author: (conv.isGroup && !fromMyself)
-              ? (m['senderUsername'] as String?)
-              : null,
+          // On RETIENT toujours le pseudo de l'auteur d'un message reçu ;
+          // l'affichage, lui, est réservé aux groupes (côté UI). Le stocker
+          // sans condition évite une course : le drapeau `isGroup` peut n'être
+          // posé qu'à l'annonce de nom, parfois APRÈS le premier message.
+          author: fromMyself ? null : (m['senderUsername'] as String?),
           // L'échéance est calculée chez CHAQUE partie à partir du réglage
           // partagé, plutôt que transportée par l'expéditeur : sinon celui-ci
           // pourrait annoncer une échéance longue tout en affichant courte

@@ -1279,7 +1279,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         : CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _bulle(theme, m, memeAuteurAvant, memeAuteurApres),
+                      _bulle(theme, m, memeAuteurAvant, memeAuteurApres, conv.isGroup),
                       if (m.reactions.isNotEmpty) _reactions(theme, m),
                       // Le pied porte l'heure et l'état ; on le montre en fin de
                       // groupe, ou toujours pour un échec — un « réessayer »
@@ -1336,7 +1336,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return HSLColor.fromAHSL(1, teinte, 0.55, sombre ? 0.72 : 0.42).toColor();
   }
 
-  Widget _bulle(ThemeData theme, ChatMessage m, bool suiteAvant, bool suiteApres) {
+  Widget _bulle(ThemeData theme, ChatMessage m, bool suiteAvant, bool suiteApres, bool enGroupe) {
     final mien = m.mine;
     final encre =
         mien ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface;
@@ -1370,10 +1370,10 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Nom de l'auteur en tête de bloc, en groupe seulement : à plusieurs,
-          // on doit savoir qui parle. Une couleur dérivée du pseudo distingue
-          // les auteurs d'un coup d'œil sans légende.
-          if (!mien && !suiteAvant && m.author != null)
+          // Nom de l'auteur en tête de bloc, en GROUPE seulement : à plusieurs,
+          // on doit savoir qui parle. L'auteur est stocké aussi en direct (pour
+          // éviter une course au marquage du groupe), mais on ne l'affiche pas.
+          if (enGroupe && !mien && !suiteAvant && m.author != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 2),
               child: Text(
