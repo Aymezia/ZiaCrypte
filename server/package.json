@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "test": "RATE_LIMIT_REGISTER_MAX=1000 vitest run"
+    "test": "RATE_LIMIT_REGISTER_MAX=1000 TURN_URLS=turn:appel.test:3478,turns:appel.test:5349 TURN_SHARED_SECRET=secret-de-test-1234567890 vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1090.0",

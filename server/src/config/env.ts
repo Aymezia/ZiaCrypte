@@ -64,6 +64,22 @@ const schema = z.object({
   // des métadonnées. Le délai laisse la place à une reprise côté client.
   RETENTION_DELIVERED_HOURS: z.coerce.number().default(24),
   RETENTION_INTERVAL_HOURS: z.coerce.number().default(6),
+
+  // Appels chiffrés (WebRTC) — serveur TURN.
+  //
+  // OPTIONNEL, comme le stockage et le push : sans ces variables, le serveur
+  // démarre et l'endpoint de credentials répond « appels indisponibles » (503).
+  // La voix serait de toute façon chiffrée de bout en bout par WebRTC ; le TURN
+  // ne fait que relayer du média qu'il ne peut pas déchiffrer.
+  //
+  // TURN_URLS : liste séparée par des virgules, ex.
+  //   turn:appel.exemple.fr:3478,turns:appel.exemple.fr:5349
+  // TURN_SHARED_SECRET : le MÊME secret que le `static-auth-secret` de coturn.
+  //   Les identifiants sont dérivés par HMAC (schéma REST API de coturn) et
+  //   n'ont qu'une durée de vie courte — jamais de mot de passe TURN en dur.
+  TURN_URLS: z.string().optional(),
+  TURN_SHARED_SECRET: z.string().min(16).optional(),
+  TURN_CREDENTIAL_TTL: z.coerce.number().default(3600),
 });
 
 export const env = schema.parse(process.env);

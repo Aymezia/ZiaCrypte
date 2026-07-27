@@ -26,5 +26,28 @@ services:
     ports:
       - "3210:3210"
 
+  # Relais TURN pour les appels chiffrés. La voix est chiffrée de bout en bout
+  # par WebRTC : ce service ne relaie que des octets qu'il ne peut pas lire.
+  #
+  # Le secret est le MÊME que TURN_SHARED_SECRET côté serveur (le .env sert de
+  # source unique). Ports relais 49160-49200 publiés en UDP pour le média.
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    env_file:
+      - ../server/.env
+    # Le secret vient du .env (source unique, partagée avec le serveur). En
+    # PRODUCTION derrière un NAT, ajouter --external-ip=<IP publique du VPS>,
+    # sinon les candidats relais annoncent une adresse privée injoignable.
+    command: >
+      -c /etc/coturn/turnserver.conf
+      --static-auth-secret=${TURN_SHARED_SECRET}
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"
+      - "49160-49200:49160-49200/udp"
+
 volumes:
   postgres_data:
