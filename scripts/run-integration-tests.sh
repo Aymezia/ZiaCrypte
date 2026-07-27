@@ -49,6 +49,8 @@ echo ">> Démarrage d'un serveur d'essai sur le port $PORT"
   RATE_LIMIT_REGISTER_MAX=100000 \
   RATE_LIMIT_PASSWORD_MAX=100000 \
   RATE_LIMIT_MESSAGE_MAX=100000 \
+  TURN_URLS=turn:appel.test:3478 \
+  TURN_SHARED_SECRET=secret-de-test-integration-1234 \
   exec node dist/index.js
 ) >/tmp/zia-test-server.log 2>&1 &
 SERVEUR=$!
@@ -82,7 +84,7 @@ cd "$ROOT/app"
 dbus-run-session -- bash -c \
   'echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
    flutter test --dart-define=ZIA_TEST_SERVER=http://127.0.0.1:'"$PORT"' \
-     test/groupe_integration_test.dart test/statuts_integration_test.dart test/canal_integration_test.dart test/envoi_echec_integration_test.dart test/refresh_token_integration_test.dart'
+     test/groupe_integration_test.dart test/statuts_integration_test.dart test/canal_integration_test.dart test/envoi_echec_integration_test.dart test/refresh_token_integration_test.dart test/appel_integration_test.dart'
 CODE=$?
 kill "$SERVEUR" 2>/dev/null
 exit $CODE

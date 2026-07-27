@@ -553,6 +553,7 @@ class ChatService extends ChangeNotifier {
     _enLigne.clear();
     _abonnementPresence = {};
     _abonnesCanal.clear();
+    _terminerAppel();
     statuts.clear();
     // Le jeton de remise appartient à la session qui se ferme. Le conserver
     // ferait annoncer au compte suivant celui du précédent.
@@ -1505,6 +1506,195 @@ class ChatService extends ChangeNotifier {
     if (conv.id != activeConversationId) conv.unread++;
     await _saveHistory(conv);
     return conv;
+  }
+
+  // ------------------------------------------------------------- Appels
+  //
+  // La voix (à venir en phase 3b, WebRTC) sera chiffrée de bout en bout par
+  // DTLS-SRTP. Ce qu'on gère ici est la SIGNALISATION : offre/réponse/ICE. Elle
+  // voyage chiffrée par le MÊME Double Ratchet que les messages — pas par le
+  // scellé — parce qu'il faut l'AUTHENTICITÉ : le serveur ne doit pas pouvoir
+  // forger un faux SDP (donc une fausse empreinte DTLS) et s'intercaler. Seul
+  // celui qui détient la session peut produire un chiffré valide.
+
+  /// État de l'appel courant. Un seul à la fois.
+  CallEtat callEtat = CallEtat.aucun;
+  String? callId;
+  String? callPeerName;
+
+  /// Appareil du correspondant avec qui l'appel se déroule (celui qui a
+  /// invité, ou celui qui a répondu). C'est par sa session qu'on chiffre.
+  String? callPairDevice;
+
+  /// Credentials TURN du dernier appel, transmis à WebRTC en phase 3b.
+  List<dynamic>? callIceServers;
+
+  bool get enAppel => callEtat != CallEtat.aucun;
+
+  /// Démarre un appel vers le correspondant d'une conversation directe.
+  Future<void> appeler(Conversation conv) async {
+    final api = _api;
+    if (api == null || conv.isGroup || conv.isChannel || enAppel) return;
+    // Un relais est nécessaire (on force le relais pour cacher les IP) : sans
+    // TURN configuré côté serveur, l'appel ne peut pas aboutir.
+    final creds = await api.turnCredentials();
+    if (creds == null) {
+      error = 'Les appels ne sont pas disponibles sur ce serveur.';
+      notifyListeners();
+      return;
+    }
+    callIceServers = creds['iceServers'] as List<dynamic>?;
+    final id = _uuidV4();
+    callId = id;
+    callPeerName = conv.peerUsername;
+    callEtat = CallEtat.sortant;
+    // On sonne chez CHAQUE appareil du correspondant : il décroche où il veut.
+    final cibles = conv.sessions.keys
+        .where((d) => !conv.ownDeviceIds.contains(d))
+        .toList();
+    callPairDevice = cibles.isNotEmpty ? cibles.first : null;
+    notifyListeners();
+    // L'invitation ne porte pas encore de SDP : le média WebRTC arrive en 3b.
+    // On transmet un marqueur, suffisant pour faire sonner et éprouver le canal.
+    for (final device in cibles) {
+      await _envoyerSignalAppel(conv, device, id, 'invite', {'v': 1});
+    }
+  }
+
+  /// Accepte l'appel entrant.
+  Future<void> accepterAppel() async {
+    final device = callPairDevice;
+    final id = callId;
+    if (callEtat != CallEtat.entrant || device == null || id == null) return;
+    final conv = _convPourDevice(device);
+    if (conv == null) return;
+    callEtat = CallEtat.connecte;
+    notifyListeners();
+    await _envoyerSignalAppel(conv, device, id, 'answer', {'v': 1});
+  }
+
+  /// Refuse un appel entrant, ou raccroche un appel en cours / sortant.
+  Future<void> raccrocher() async {
+    final device = callPairDevice;
+    final id = callId;
+    final kind = callEtat == CallEtat.entrant ? 'decline' : 'hangup';
+    if (device != null && id != null) {
+      final conv = _convPourDevice(device);
+      if (conv != null) {
+        await _envoyerSignalAppel(conv, device, id, kind, const {});
+      }
+    }
+    _terminerAppel();
+  }
+
+  void _terminerAppel() {
+    callEtat = CallEtat.aucun;
+    callId = null;
+    callPeerName = null;
+    callPairDevice = null;
+    callIceServers = null;
+    notifyListeners();
+  }
+
+  /// Chiffre une charge de signalisation avec la session du destinataire et
+  /// l'envoie par le WebSocket, opaque pour le serveur.
+  Future<void> _envoyerSignalAppel(Conversation conv, String device,
+      String id, String kind, Map<String, Object?> data) async {
+    final gateway = _gateway;
+    final socket = _socket;
+    final sessionId = conv.sessions[device];
+    if (gateway == null || socket == null || sessionId == null) return;
+    try {
+      final enc = await gateway.encrypt(
+          sessionId, Uint8List.fromList(utf8.encode(jsonEncode(data))));
+      final handshake = _pendingHandshakes['${conv.id}-$device'];
+      final entete = Envelope.packHeader(enc.header, handshake);
+      // payload = [longueur d'en-tête sur 2 octets][en-tête ratchet][chiffré].
+      // Tout est DANS le payload opaque : le serveur ne relaie que ce champ, il
+      // ne faut donc rien mettre à côté qu'il perdrait en route.
+      final hlen = entete.length;
+      final payload = base64Encode(Uint8List.fromList([
+        (hlen >> 8) & 0xff,
+        hlen & 0xff,
+        ...entete,
+        ...enc.ciphertext,
+      ]));
+      socket.add(jsonEncode({
+        'type': 'call.signal',
+        'to': [device],
+        'callId': id,
+        'kind': kind,
+        'payload': payload,
+      }));
+    } catch (_) {
+      // un signal d'appel raté n'a pas à interrompre le reste
+    }
+  }
+
+  /// Reçoit un signal d'appel relayé, le déchiffre, et fait avancer l'état.
+  Future<void> _recevoirSignalAppel(Map<String, dynamic> frame) async {
+    final gateway = _gateway;
+    final from = frame['from'] as String?;
+    final kind = frame['kind'] as String?;
+    final id = frame['callId'] as String?;
+    if (gateway == null || from == null || kind == null || id == null) return;
+
+    // Fin d'appel : pas besoin de déchiffrer, seul l'appel courant est concerné.
+    if (kind == 'hangup' || kind == 'decline') {
+      if (callId == id) _terminerAppel();
+      return;
+    }
+
+    final conv = _convPourDevice(from);
+    if (conv == null) return;
+
+    // Déchiffre le SDP/ICE. On ne s'en sert pas encore (WebRTC en 3b), mais le
+    // déchiffrement PROUVE l'authenticité : un faux signal du serveur échouerait.
+    try {
+      final brut = base64Decode(frame['payload'] as String);
+      final hlen = (brut[0] << 8) | brut[1];
+      final entete = Uint8List.sublistView(brut, 2, 2 + hlen);
+      final chiffre = Uint8List.sublistView(brut, 2 + hlen);
+      final unpacked = Envelope.unpackHeader(entete);
+      if (unpacked.handshake != null && !conv.sessions.containsKey(from)) {
+        conv.sessions[from] = await gateway.acceptSession(unpacked.handshake!);
+      }
+      final sessionId = conv.sessions[from];
+      if (sessionId == null) return;
+      await gateway.decrypt(sessionId, unpacked.ratchetHeader, chiffre);
+    } catch (_) {
+      return; // signal illisible ou forgé : ignoré
+    }
+
+    switch (kind) {
+      case 'invite':
+        // Déjà en appel : on refuse (occupé). Sinon on fait sonner.
+        if (enAppel) {
+          await _envoyerSignalAppel(conv, from, id, 'decline', const {});
+          return;
+        }
+        callId = id;
+        callPairDevice = from;
+        callPeerName = conv.peerUsername;
+        callEtat = CallEtat.entrant;
+        notifyListeners();
+      case 'answer':
+        if (callId == id && callEtat == CallEtat.sortant) {
+          callEtat = CallEtat.connecte;
+          notifyListeners();
+        }
+      case 'ice':
+        // Candidats ICE : consommés par WebRTC en 3b.
+        break;
+    }
+  }
+
+  /// Conversation directe possédant une session avec cet appareil.
+  Conversation? _convPourDevice(String device) {
+    for (final c in _conversations.values) {
+      if (!c.isGroup && !c.isChannel && c.sessions.containsKey(device)) return c;
+    }
+    return null;
   }
 
   Uint8List _octetsAleatoires(int n) {
@@ -2943,6 +3133,11 @@ class ChatService extends ChangeNotifier {
       final json = jsonDecode(brut) as Map<String, dynamic>;
       final type = json['type'] as String?;
 
+      if (type == 'call.signal') {
+        unawaited(_recevoirSignalAppel(json));
+        return;
+      }
+
       if (type == 'presence.snapshot') {
         // L'instantané fait autorité : il remplace ce qu'on croyait savoir,
         // sinon un appareil déconnecté pendant une coupure resterait allumé.
@@ -3379,3 +3574,18 @@ class ChatService extends ChangeNotifier {
 /// expirée ; un 409 signale un pseudo pris à la création, mais une clé
 /// d'identité déjà utilisée à l'ajout d'un appareil.
 enum _AuthKind { aucun, creation, reconnexion, compteExistant }
+
+/// État d'un appel, du point de vue local.
+enum CallEtat {
+  /// Aucun appel.
+  aucun,
+
+  /// On appelle et ça sonne chez le correspondant.
+  sortant,
+
+  /// Le correspondant nous appelle et ça sonne ici.
+  entrant,
+
+  /// Appel accepté des deux côtés (média établi en phase 3b).
+  connecte,
+}

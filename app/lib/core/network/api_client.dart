@@ -324,6 +324,18 @@ class ApiClient {
     });
   }
 
+  /// Identifiants TURN à durée limitée pour un appel. Null si le serveur
+  /// n'a pas de relais configuré (503) — pas d'appels sur ce déploiement.
+  Future<Map<String, dynamic>?> turnCredentials() async {
+    try {
+      final res = await _dio.get<Map<String, dynamic>>('/v1/turn-credentials');
+      return res.data;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 503) return null;
+      rethrow;
+    }
+  }
+
   // ---- Canaux de diffusion ----
 
   /// Crée un canal en déposant sa clé de lecture scellée. Renvoie l'id du canal
