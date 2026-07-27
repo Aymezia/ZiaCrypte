@@ -58,6 +58,21 @@ sudo docker run -d --name coturn --restart unless-stopped --network host \
 `--external-ip` est indispensable derrière un NAT : sans lui, coturn annonce une
 adresse privée injoignable.
 
+> **NAT 1:1 (OVH, Scaleway, la plupart des VPS).** Si `ip addr` montre une
+> adresse *privée* (`100.64.0.0/10`, `10.0.0.0/8`, `192.168.0.0/16`) sur
+> l'interface, et non l'IP publique, la machine est en NAT 1:1 : le fournisseur
+> traduit publique ↔ privée en amont. coturn doit alors connaître **les deux**,
+> sous la forme `PUBLIQUE/PRIVÉE`, sinon il alloue ses relais sur l'adresse
+> privée et l'annonce telle quelle — l'appel reste bloqué sur « Connexion… » :
+>
+> ```bash
+> --external-ip="51.83.199.103/100.65.78.125"   # publique/privée
+> ```
+>
+> Pour vérifier une allocation réelle sans appareil : `turnutils_uclient -y -u
+> <expiry>:<user> -w <credential> <IP_PUBLIQUE>` doit journaliser
+> `ALLOCATE processed, success` (logs `journalctl -u coturn` avec `verbose`).
+
 ### TLS (recommandé en production)
 
 Pour `turns:` (port 5349), décommente `cert=` / `pkey=` dans `turnserver.conf`

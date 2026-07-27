@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -7,22 +9,57 @@ import '../data/chat_service.dart';
 ///
 /// Il ne montre que ce qui importe pendant un appel : qui, l'état, et les deux
 /// ou trois gestes possibles. Aucun contenu du fil ne doit distraire.
-class CallOverlay extends StatelessWidget {
+class CallOverlay extends StatefulWidget {
   const CallOverlay({super.key, required this.service});
 
   final ChatService service;
 
   @override
+  State<CallOverlay> createState() => _CallOverlayState();
+}
+
+class _CallOverlayState extends State<CallOverlay> {
+  Timer? _tic;
+
+  @override
+  void initState() {
+    super.initState();
+    // Rafraîchit la durée affichée chaque seconde pendant l'appel.
+    _tic = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tic?.cancel();
+    super.dispose();
+  }
+
+  /// Durée écoulée depuis le décroché, en `M:SS`.
+  String? _duree() {
+    final depuis = widget.service.callDepuis;
+    if (depuis == null) return null;
+    final d = DateTime.now().difference(depuis);
+    final m = d.inMinutes;
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final service = widget.service;
     final theme = Theme.of(context);
     final entrant = service.callEtat == CallEtat.entrant;
     final connecte = service.callEtat == CallEtat.connecte;
 
+    final duree = _duree();
     final etat = switch (service.callEtat) {
       CallEtat.entrant => 'Appel entrant',
       CallEtat.sortant => 'Appel…',
-      CallEtat.connecte =>
-        service.callMediaConnecte ? 'En communication' : 'Connexion…',
+      CallEtat.connecte => service.callMediaConnecte
+          ? (duree ?? 'En communication')
+          : 'Connexion…',
       CallEtat.aucun => '',
     };
 

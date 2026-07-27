@@ -554,7 +554,7 @@ class ChatService extends ChangeNotifier {
     _enLigne.clear();
     _abonnementPresence = {};
     _abonnesCanal.clear();
-    _terminerAppel();
+    _terminerAppel(trace: false);
     statuts.clear();
     // Le jeton de remise appartient à la session qui se ferme. Le conserver
     // ferait annoncer au compte suivant celui du précédent.
@@ -1523,6 +1523,13 @@ class ChatService extends ChangeNotifier {
   String? callId;
   String? callPeerName;
 
+  /// Conversation de l'appel courant : là où on inscrira une trace à la fin.
+  String? _callConvId;
+
+  /// Instant où l'appel a été accepté (état « connecté »). Sert au minuteur de
+  /// durée affiché pendant l'appel, et au calcul de la durée dans la trace.
+  DateTime? callDepuis;
+
   /// Appareil du correspondant avec qui l'appel se déroule (celui qui a
   /// invité, ou celui qui a répondu). C'est par sa session qu'on chiffre.
   String? callPairDevice;
@@ -1600,6 +1607,7 @@ class ChatService extends ChangeNotifier {
     final id = _uuidV4();
     callId = id;
     callPeerName = conv.peerUsername;
+    _callConvId = conv.id;
     callEtat = CallEtat.sortant;
     // On sonne chez CHAQUE appareil du correspondant : il décroche où il veut.
     final cibles = conv.sessions.keys
@@ -1608,7 +1616,7 @@ class ChatService extends ChangeNotifier {
     callPairDevice = cibles.isNotEmpty ? cibles.first : null;
     final device = callPairDevice;
     if (device == null) {
-      _terminerAppel();
+      _terminerAppel(trace: false);
       return;
     }
     notifyListeners();
@@ -1637,6 +1645,7 @@ class ChatService extends ChangeNotifier {
     final conv = _convPourDevice(device);
     if (conv == null) return;
     callEtat = CallEtat.connecte;
+    callDepuis = DateTime.now();
     notifyListeners();
 
     // Répond au média avec la réponse WebRTC, si une offre a été reçue.
@@ -1672,10 +1681,17 @@ class ChatService extends ChangeNotifier {
         await _envoyerSignalAppel(conv, device, id, kind, const {});
       }
     }
-    _terminerAppel();
+    _terminerAppel(refuse: kind == 'decline');
   }
 
-  void _terminerAppel() {
+  /// Termine l'appel courant et libère les ressources média.
+  ///
+  /// [trace] inscrit une ligne dans la conversation (durée, manqué, refusé…) —
+  /// mis à false pour les abandons avant sonnerie et les remises à zéro de
+  /// compte, où aucune trace n'a de sens. [refuse] distingue un refus explicite
+  /// (par soi ou par le correspondant) d'une simple annulation.
+  void _terminerAppel({bool trace = true, bool refuse = false}) {
+    if (trace) _tracerFinAppel(refuse);
     final s = _callSession;
     _callSession = null;
     if (s != null) unawaited(s.fermer());
@@ -1688,7 +1704,47 @@ class ChatService extends ChangeNotifier {
     _iceEnAttente.clear();
     callMuet = false;
     callMediaConnecte = false;
+    _callConvId = null;
+    callDepuis = null;
     notifyListeners();
+  }
+
+  /// Ajoute la trace de fin d'appel dans la conversation concernée.
+  void _tracerFinAppel(bool refuse) {
+    final convId = _callConvId;
+    if (convId == null) return;
+    final conv = _conversations[convId];
+    if (conv == null) return;
+    final depuis = callDepuis;
+    final String texte;
+    if (depuis != null) {
+      texte = 'Appel · ${_dureeAppel(DateTime.now().difference(depuis))}';
+    } else if (refuse) {
+      texte = 'Appel refusé';
+    } else if (callEtat == CallEtat.entrant) {
+      texte = 'Appel manqué';
+    } else if (callEtat == CallEtat.sortant) {
+      texte = 'Appel annulé';
+    } else {
+      return;
+    }
+    conv.messages.add(ChatMessage(
+      text: texte,
+      mine: false,
+      at: DateTime.now(),
+      systeme: true,
+    ));
+    unawaited(_saveHistory(conv));
+  }
+
+  /// Formate une durée d'appel en `M:SS` (ou `H:MM:SS` au-delà de l'heure).
+  static String _dureeAppel(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    final ss = s.toString().padLeft(2, '0');
+    if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:$ss';
+    return '$m:$ss';
   }
 
   /// Chiffre une charge de signalisation avec la session du destinataire et
@@ -1736,7 +1792,7 @@ class ChatService extends ChangeNotifier {
 
     // Fin d'appel : pas besoin de déchiffrer, seul l'appel courant est concerné.
     if (kind == 'hangup' || kind == 'decline') {
-      if (callId == id) _terminerAppel();
+      if (callId == id) _terminerAppel(refuse: kind == 'decline');
       return;
     }
 
@@ -1775,11 +1831,13 @@ class ChatService extends ChangeNotifier {
         callId = id;
         callPairDevice = from;
         callPeerName = conv.peerUsername;
+        _callConvId = conv.id;
         callEtat = CallEtat.entrant;
         notifyListeners();
       case 'answer':
         if (callId == id && callEtat == CallEtat.sortant) {
           callEtat = CallEtat.connecte;
+          callDepuis = DateTime.now();
           notifyListeners();
           // L'appelant applique la réponse média de l'appelé.
           if (data['sdp'] != null) {
