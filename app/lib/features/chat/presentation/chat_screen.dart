@@ -15,6 +15,7 @@ import '../data/chat_service.dart';
 import 'identity_avatar.dart';
 import 'media_bubble.dart';
 import 'search_sheet.dart';
+import 'call_overlay.dart';
 import 'linked_text.dart';
 import 'verification_sheet.dart';
 import 'voice_message_bubble.dart';
@@ -556,27 +557,32 @@ class _ChatScreenState extends State<ChatScreen> {
             mien: dernier?.mine ?? false);
 
         // Fenêtre étroite : on affiche soit la liste, soit la conversation.
-        if (!wide) {
-          return conv == null
-              ? _listScaffold(theme, s)
-              : _conversationScaffold(theme, s, showBack: true);
-        }
+        final Widget contenu = !wide
+            ? (conv == null
+                ? _listScaffold(theme, s)
+                : _conversationScaffold(theme, s, showBack: true))
+            : Scaffold(
+                body: Row(
+                  children: [
+                    SizedBox(
+                      width: 300,
+                      child: _conversationList(theme, s),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(
+                      child: conv == null
+                          ? _emptyState(theme)
+                          : _conversationPane(theme, s),
+                    ),
+                  ],
+                ),
+              );
 
-        return Scaffold(
-          body: Row(
-            children: [
-              SizedBox(
-                width: 300,
-                child: _conversationList(theme, s),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: conv == null
-                    ? _emptyState(theme)
-                    : _conversationPane(theme, s),
-              ),
-            ],
-          ),
+        // L'écran d'appel se superpose à tout : un appel entrant doit être
+        // impossible à manquer, où qu'on soit dans l'application.
+        if (!s.enAppel) return contenu;
+        return Stack(
+          children: [contenu, Positioned.fill(child: CallOverlay(service: s))],
         );
       },
     );
@@ -861,6 +867,7 @@ class _ChatScreenState extends State<ChatScreen> {
               : null,
           title: _conversationTitle(theme, s),
           actions: [
+            _boutonAppel(theme, s),
             if (!(s.active?.isChannel ?? false)) _boutonEphemere(theme, s),
             _menuConversation(theme, s),
           ],
@@ -881,6 +888,23 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(child: _messagesAndComposer(theme, s)),
         ],
       );
+
+  /// Bouton d'appel vocal, dans l'en-tête d'une conversation DIRECTE.
+  ///
+  /// Rien sur un groupe ou un canal : l'appel de groupe n'existe pas encore, et
+  /// un canal est à sens unique.
+  Widget _boutonAppel(ThemeData theme, ChatService s) {
+    final conv = s.active;
+    if (conv == null || conv.isGroup || conv.isChannel) {
+      return const SizedBox.shrink();
+    }
+    return IconButton(
+      tooltip: 'Appeler',
+      // Désactivé pendant un appel : un seul à la fois.
+      onPressed: s.enAppel || !conv.ready ? null : () => s.appeler(conv),
+      icon: const Icon(Icons.call_outlined),
+    );
+  }
 
   /// Réglage des messages éphémères, dans l'en-tête de la conversation.
   ///
