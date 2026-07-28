@@ -1644,6 +1644,23 @@ class ChatService extends ChangeNotifier {
     if (callEtat != CallEtat.entrant || device == null || id == null) return;
     final conv = _convPourDevice(device);
     if (conv == null) return;
+
+    // Le correspondant a besoin de SES PROPRES identifiants TURN : en relais
+    // forcé (iceTransportPolicy: relay), un pair sans serveur ICE ne peut créer
+    // aucun candidat — l'appel resterait bloqué sur « Connexion… » alors que
+    // l'appelant, lui, a déjà les siens. C'est pourquoi on les récupère ici,
+    // côté appelé, avant de construire la session média.
+    final api = _api;
+    if (callIceServers == null && api != null) {
+      try {
+        final creds = await api.turnCredentials();
+        callIceServers = creds?['iceServers'] as List<dynamic>?;
+      } catch (_) {
+        // Échec de récupération : on accepte quand même (l'état reste cohérent
+        // et raccrochable), mais l'audio n'aboutira pas faute de relais.
+      }
+    }
+
     callEtat = CallEtat.connecte;
     callDepuis = DateTime.now();
     notifyListeners();

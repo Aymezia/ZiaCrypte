@@ -85,13 +85,23 @@ sans lui, reste sur `turn:` (l'appel est chiffré de toute façon).
 Dans le `.env` du serveur (celui que lit le service systemd) :
 
 ```bash
-TURN_URLS=turns:appel.tondomaine.fr:5349,turn:appel.tondomaine.fr:3478
+TURN_URLS=turns:appel.tondomaine.fr:5349,turn:appel.tondomaine.fr:3478,turn:appel.tondomaine.fr:3478?transport=tcp
 TURN_SHARED_SECRET=LE_SECRET_DE_L_ETAPE_1
 # TURN_CREDENTIAL_TTL=3600   # optionnel, durée de vie des identifiants (secondes)
 ```
 
 `TURN_URLS` liste ce que le client tentera dans l'ordre. Mets l'IP publique ou un
-sous-domaine qui pointe dessus. Puis redémarre :
+sous-domaine qui pointe dessus.
+
+> **Toujours prévoir un transport TCP.** Beaucoup de réseaux (mobiles,
+> entreprises, certains FAI) **bloquent l'UDP sortant** : le relais UDP par
+> défaut n'aboutit jamais et l'appel reste sur « Connexion… ». Ajoute donc
+> `turn:…:3478?transport=tcp` (et idéalement `turns:…:5349` en TLS) : le client
+> essaie l'UDP d'abord — meilleure latence — puis retombe sur TCP. Le TCP passe
+> partout où la poignée de main TCP passe. Sans ce repli, un correspondant en
+> UDP bloqué ne peut pas appeler du tout.
+
+Puis redémarre :
 
 ```bash
 sudo systemctl restart ziacrypte-server

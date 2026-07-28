@@ -1,6 +1,6 @@
-# ZiaCrypte v0.14.2 — les appels laissent une trace
+# ZiaCrypte v0.14.3 — les appels se connectent enfin
 
-Petit palier de finition sur les appels vocaux : on voit enfin **combien de temps** dure un appel, et chaque appel **laisse une ligne dans la conversation** — durée, manqué, refusé, annulé.
+Correctif de fond sur les appels vocaux : ils restaient bloqués sur « Connexion… » sans jamais aboutir. **Il faut cette version sur les deux appareils** pour que les appels fonctionnent.
 
 ## Downloads
 
@@ -14,22 +14,13 @@ Petit palier de finition sur les appels vocaux : on voit enfin **combien de temp
 
 Every asset is signed, and the application verifies the signature before installing an update.
 
-## Nouveautés
+## Le correctif
 
-- **Minuteur d'appel.** Une fois en communication, l'écran d'appel affiche la durée qui défile (`0:07`, `1:42`…) au lieu d'un simple « En communication ».
-- **Historique dans le fil.** À la fin d'un appel, une ligne discrète s'inscrit dans la conversation :
-  - **`Appel · 2:34`** quand il a abouti (durée),
-  - **`Appel manqué`** si on n'a pas décroché,
-  - **`Appel refusé`** si l'un des deux a refusé,
-  - **`Appel annulé`** si l'appelant a raccroché avant la réponse.
+- **L'appelé récupère maintenant ses propres identifiants de relais.** C'était le vrai blocage : seul l'appelant demandait un accès au relais TURN. Comme les appels forcent le passage par le relais (pour masquer les adresses IP), le correspondant qui décroche n'avait **aucun serveur relais** et ne pouvait produire aucun chemin réseau — l'appel restait « en connexion » indéfiniment. Les deux côtés obtiennent désormais leurs identifiants.
+- **Repli TCP quand l'UDP est bloqué.** Beaucoup de réseaux (mobiles, entreprises) coupent l'UDP sortant, ce qu'utilise le relais par défaut. L'application tente désormais aussi le relais **en TCP** : elle essaie l'UDP d'abord (meilleure latence), puis retombe sur TCP, qui passe partout. (Réglage côté serveur, déjà en place sur le relais de production.)
 
-  Chaque côté note ce qu'il a vécu — rien n'est synchronisé ni envoyé au serveur.
+## Vérifié
 
-## Côté serveur / relais
-
-- Le guide de déploiement TURN gagne une note sur le **NAT 1:1** (OVH, Scaleway…) : coturn doit recevoir `--external-ip=PUBLIQUE/PRIVÉE`, sinon il annonce une adresse privée injoignable et l'appel reste bloqué sur « Connexion… ». C'est précisément le réglage appliqué au relais de production.
-
-## Verified by actually running it
-
-- Flutter suite verte ; le test d'appel à deux clients vérifie désormais aussi que **la trace d'appel apparaît des deux côtés**, chiffrée, entre l'appelant et l'appelé
-- Chemin complet prouvé de bout en bout : sonnerie, acceptation, durée, raccroché, trace
+- Le test d'appel à deux clients vérifie désormais que **l'appelant ET l'appelé** obtiennent leurs identifiants de relais — la régression qui bloquait les appels est couverte
+- Chemin complet prouvé de bout en bout : sonnerie, acceptation, durée, raccroché, trace, chiffré
+- Relais de production vérifié : allocation TURN réussie (`ALLOCATE processed, success`), transport TCP joignable

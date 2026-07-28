@@ -115,11 +115,21 @@ void main() {
           reason: 'l’appel ne sonne pas chez Bob (signal non déchiffré ?)');
       expect(bob.callId, equals(alice.callId));
 
+      // L'appelant a récupéré des serveurs relais (TURN).
+      expect(alice.callIceServers, isNotNull,
+          reason: 'Alice n’a pas d’identifiants TURN');
+
       // Bob accepte : les deux passent à « connecté ».
       await bob.accepterAppel();
       expect(await _attendre(() => alice.callEtat == CallEtat.connecte), isTrue,
           reason: 'Alice n’a pas vu l’acceptation');
       expect(bob.callEtat, CallEtat.connecte);
+
+      // …et l'appelé AUSSI : en relais forcé, sans ses propres serveurs ICE il
+      // ne pourrait produire aucun candidat et l'appel resterait « en
+      // connexion ». C'est le correctif : l'appelé récupère ses identifiants.
+      expect(bob.callIceServers, isNotNull,
+          reason: 'Bob (appelé) n’a pas récupéré ses identifiants TURN');
 
       // Bob raccroche : les deux reviennent à « aucun ».
       await bob.raccrocher();
