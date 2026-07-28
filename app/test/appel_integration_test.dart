@@ -137,11 +137,13 @@ void main() {
           reason: 'le raccroché ne s’est pas propagé à Alice');
       expect(bob.enAppel, isFalse);
 
-      // L'appel a accepté puis raccroché : chacun garde une trace « Appel · … »
-      // (durée) dans le fil, côté appelant comme côté appelé.
+      // L'appel a accepté puis raccroché : chacun garde une trace « Appel … »
+      // dans le fil, côté appelant comme côté appelé. Ici le média est
+      // désactivé (WebRTC natif absent des tests), donc la trace est « Appel
+      // échoué » ; avec média réel et abouti, ce serait « Appel · durée ».
       bool traceAppel(ChatService s) => s.conversations
           .expand((c) => c.messages)
-          .any((m) => m.systeme && m.text.startsWith('Appel · '));
+          .any((m) => m.systeme && m.text.startsWith('Appel'));
       expect(await _attendre(() => traceAppel(bob)), isTrue,
           reason: 'Bob n’a pas de trace d’appel dans le fil');
       expect(await _attendre(() => traceAppel(alice)), isTrue,

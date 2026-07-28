@@ -74,6 +74,17 @@ class CallMedia {
       onConnecte(
           state == RTCPeerConnectionState.RTCPeerConnectionStateConnected);
     };
+    // L'état de connexion agrégé (onConnectionState) n'est pas rapporté de façon
+    // fiable sur toutes les plateformes ; l'état ICE, lui, l'est. On s'appuie
+    // donc sur les deux : « connecté/complété » → média en place.
+    _pc!.onIceConnectionState = (state) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+        onConnecte(true);
+      } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        onConnecte(false);
+      }
+    };
   }
 
   /// Côté appelant : prépare le média et produit l'offre à joindre à l'invite.

@@ -1552,6 +1552,15 @@ class ChatService extends ChangeNotifier {
   bool callMuet = false;
   bool callMediaConnecte = false;
 
+  /// Le média s'est-il connecté AU MOINS une fois pendant cet appel ? Sert à
+  /// distinguer un appel abouti (trace « Appel · durée ») d'un appel accepté
+  /// mais jamais établi (trace « Appel échoué »).
+  bool _mediaAConnecte = false;
+
+  /// Délai de garde : si le média n'est pas établi peu après l'acceptation, on
+  /// termine l'appel avec une erreur au lieu de laisser « Connexion… » à vie.
+  Timer? _timeoutMedia;
+
   /// Active la couche média WebRTC. Désactivable par les tests : WebRTC exige un
   /// binding natif absent d'un `flutter test`, où seule la SIGNALISATION est
   /// éprouvée. En production, toujours vrai.
@@ -1577,6 +1586,10 @@ class ChatService extends ChangeNotifier {
           unawaited(_envoyerSignalAppel(conv, device, id, kind, data)),
       onConnecte: (c) {
         callMediaConnecte = c;
+        if (c) {
+          _mediaAConnecte = true;
+          _timeoutMedia?.cancel(); // connecté : plus besoin du délai de garde
+        }
         notifyListeners();
       },
     );
@@ -1680,11 +1693,34 @@ class ChatService extends ChangeNotifier {
           } catch (_) {}
         }
         _iceEnAttente.clear();
+        _armerTimeoutMedia();
       } catch (e) {
         error = 'Micro indisponible : appel sans audio. (${_humanize(e)})';
       }
     }
     await _envoyerSignalAppel(conv, device, id, 'answer', data);
+  }
+
+  /// Arme le délai de garde du média : appelé quand l'appel devient « connecté »
+  /// et qu'une session média existe. Si le média n'est pas établi dans le délai,
+  /// on abandonne proprement plutôt que d'afficher « Connexion… » sans fin.
+  void _armerTimeoutMedia() {
+    _timeoutMedia?.cancel();
+    _timeoutMedia = Timer(const Duration(seconds: 40), () {
+      if (callEtat == CallEtat.aucun || callMediaConnecte) return;
+      error = 'Appel impossible à connecter : le média ne s’est pas établi. '
+          '(Réseau, relais TURN ?)';
+      // Prévient le correspondant, puis termine (trace « Appel échoué »).
+      final device = callPairDevice;
+      final id = callId;
+      if (device != null && id != null) {
+        final conv = _convPourDevice(device);
+        if (conv != null) {
+          unawaited(_envoyerSignalAppel(conv, device, id, 'hangup', const {}));
+        }
+      }
+      _terminerAppel();
+    });
   }
 
   /// Refuse un appel entrant, ou raccroche un appel en cours / sortant.
@@ -1708,6 +1744,8 @@ class ChatService extends ChangeNotifier {
   /// compte, où aucune trace n'a de sens. [refuse] distingue un refus explicite
   /// (par soi ou par le correspondant) d'une simple annulation.
   void _terminerAppel({bool trace = true, bool refuse = false}) {
+    _timeoutMedia?.cancel();
+    _timeoutMedia = null;
     if (trace) _tracerFinAppel(refuse);
     final s = _callSession;
     _callSession = null;
@@ -1721,6 +1759,7 @@ class ChatService extends ChangeNotifier {
     _iceEnAttente.clear();
     callMuet = false;
     callMediaConnecte = false;
+    _mediaAConnecte = false;
     _callConvId = null;
     callDepuis = null;
     notifyListeners();
@@ -1734,7 +1773,8 @@ class ChatService extends ChangeNotifier {
     if (conv == null) return;
     final depuis = callDepuis;
     final String texte;
-    if (depuis != null) {
+    if (_mediaAConnecte && depuis != null) {
+      // Appel réellement établi : durée.
       texte = 'Appel · ${_dureeAppel(DateTime.now().difference(depuis))}';
     } else if (refuse) {
       texte = 'Appel refusé';
@@ -1742,6 +1782,9 @@ class ChatService extends ChangeNotifier {
       texte = 'Appel manqué';
     } else if (callEtat == CallEtat.sortant) {
       texte = 'Appel annulé';
+    } else if (callEtat == CallEtat.connecte) {
+      // Accepté des deux côtés, mais le média ne s'est jamais établi.
+      texte = 'Appel échoué';
     } else {
       return;
     }
@@ -1862,6 +1905,8 @@ class ChatService extends ChangeNotifier {
               await _callSession?.appliquerReponse(data);
             } catch (_) {}
           }
+          // Média en négociation : on arme le délai de garde.
+          if (_callSession != null) _armerTimeoutMedia();
         }
       case 'ice':
         // Candidat ICE du correspondant. Si notre session n'existe pas encore

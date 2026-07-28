@@ -1,6 +1,6 @@
-# ZiaCrypte v0.14.3 — les appels se connectent enfin
+# ZiaCrypte v0.14.4 — un appel qui ne se connecte pas le dit
 
-Correctif de fond sur les appels vocaux : ils restaient bloqués sur « Connexion… » sans jamais aboutir. **Il faut cette version sur les deux appareils** pour que les appels fonctionnent.
+Fiabilité des appels : plus de « Connexion… » sans fin, une détection de connexion plus robuste, et une trace honnête quand un appel échoue.
 
 ## Downloads
 
@@ -14,13 +14,13 @@ Correctif de fond sur les appels vocaux : ils restaient bloqués sur « Connexio
 
 Every asset is signed, and the application verifies the signature before installing an update.
 
-## Le correctif
+## Fiabilité des appels
 
-- **L'appelé récupère maintenant ses propres identifiants de relais.** C'était le vrai blocage : seul l'appelant demandait un accès au relais TURN. Comme les appels forcent le passage par le relais (pour masquer les adresses IP), le correspondant qui décroche n'avait **aucun serveur relais** et ne pouvait produire aucun chemin réseau — l'appel restait « en connexion » indéfiniment. Les deux côtés obtiennent désormais leurs identifiants.
-- **Repli TCP quand l'UDP est bloqué.** Beaucoup de réseaux (mobiles, entreprises) coupent l'UDP sortant, ce qu'utilise le relais par défaut. L'application tente désormais aussi le relais **en TCP** : elle essaie l'UDP d'abord (meilleure latence), puis retombe sur TCP, qui passe partout. (Réglage côté serveur, déjà en place sur le relais de production.)
+- **Fini le « Connexion… » infini.** Si le média ne s'établit pas dans les 40 secondes après l'acceptation, l'appel s'arrête proprement avec une explication (« le média ne s'est pas établi — réseau, relais TURN ? ») au lieu de rester bloqué pour toujours. Le correspondant est prévenu.
+- **Détection de connexion plus fiable.** L'écran passe à « En communication » dès que la connexion ICE aboutit, et pas seulement sur l'état agrégé — ce dernier n'étant pas rapporté partout de la même façon. Le minuteur démarre donc au bon moment.
+- **Trace d'appel honnête.** Un appel accepté mais dont le média n'a jamais abouti s'inscrit désormais « **Appel échoué** » dans le fil, distinct de « Appel · durée » (abouti), « Appel manqué », « Appel refusé » et « Appel annulé ».
 
 ## Vérifié
 
-- Le test d'appel à deux clients vérifie désormais que **l'appelant ET l'appelé** obtiennent leurs identifiants de relais — la régression qui bloquait les appels est couverte
-- Chemin complet prouvé de bout en bout : sonnerie, acceptation, durée, raccroché, trace, chiffré
-- Relais de production vérifié : allocation TURN réussie (`ALLOCATE processed, success`), transport TCP joignable
+- `flutter analyze` propre ; test d'appel à deux clients vert (appelant et appelé obtiennent leur relais ; trace inscrite des deux côtés)
+- Côté relais de production : la cause racine des appels bloqués a été corrigée séparément (coturn allouait ses relais sur la mauvaise interface — perte de 100 % des paquets ; désormais 0 %)
