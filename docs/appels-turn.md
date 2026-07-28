@@ -55,23 +55,31 @@ sudo docker run -d --name coturn --restart unless-stopped --network host \
 ```
 
 `--network host` évite d'avoir à mapper la plage de ports relais une à une.
-`--external-ip` est indispensable derrière un NAT : sans lui, coturn annonce une
-adresse privée injoignable.
+`--external-ip` n'est nécessaire que derrière un **vrai** NAT (l'IP publique
+n'est pas sur une interface locale) : il fait annoncer l'adresse joignable.
 
-> **NAT 1:1 (OVH, Scaleway, la plupart des VPS).** Si `ip addr` montre une
-> adresse *privée* (`100.64.0.0/10`, `10.0.0.0/8`, `192.168.0.0/16`) sur
-> l'interface, et non l'IP publique, la machine est en NAT 1:1 : le fournisseur
-> traduit publique ↔ privée en amont. coturn doit alors connaître **les deux**,
-> sous la forme `PUBLIQUE/PRIVÉE`, sinon il alloue ses relais sur l'adresse
-> privée et l'annonce telle quelle — l'appel reste bloqué sur « Connexion… » :
+> **Épingle coturn à l'interface publique si l'hôte a un VPN/overlay.** coturn
+> détecte *toutes* les interfaces locales et y alloue des relais. Si la machine
+> a aussi **Tailscale**, un WireGuard, un docker0… il allouera aussi des relais
+> sur ces interfaces (souvent en `100.64.0.0/10` pour Tailscale, `10.x`, `172.x`)
+> — **injoignables des clients**. Symptôme caractéristique : l'allocation
+> réussit, mais **100 % des paquets relais sont perdus** et l'appel reste sur
+> « Connexion… ». Le remède : forcer coturn sur la seule IP publique.
 >
-> ```bash
-> --external-ip="51.83.199.103/100.65.78.125"   # publique/privée
+> ```conf
+> listening-ip=<IP_PUBLIQUE>
+> relay-ip=<IP_PUBLIQUE>
+> external-ip=<IP_PUBLIQUE>
 > ```
 >
-> Pour vérifier une allocation réelle sans appareil : `turnutils_uclient -y -u
-> <expiry>:<user> -w <credential> <IP_PUBLIQUE>` doit journaliser
-> `ALLOCATE processed, success` (logs `journalctl -u coturn` avec `verbose`).
+> Vérifie que l'IP publique est bien locale : `ip -4 addr show` doit la lister
+> (sinon, vrai NAT → garde `external-ip`). **Teste le relais sans appareil** —
+> c'est ce qui révèle le problème :
+>
+> ```bash
+> turnutils_uclient -y -s -n 8 -u <expiry>:<user> -w <credential> <IP_PUBLIQUE>
+> # → "Total lost packets 0 (0%)".  100 % de perte = relais sur la mauvaise interface.
+> ```
 
 ### TLS (recommandé en production)
 
