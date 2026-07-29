@@ -1,6 +1,6 @@
-# ZiaCrypte v0.14.4 — un appel qui ne se connecte pas le dit
+# ZiaCrypte v0.14.5 — l'appel sonne sur tous les appareils
 
-Fiabilité des appels : plus de « Connexion… » sans fin, une détection de connexion plus robuste, et une trace honnête quand un appel échoue.
+Correctif : après une réinstallation, le correspondant ne recevait plus les appels. On sonnait un seul de ses appareils — parfois l'ancien, disparu. **À installer sur les deux appareils.**
 
 ## Downloads
 
@@ -14,13 +14,12 @@ Fiabilité des appels : plus de « Connexion… » sans fin, une détection de c
 
 Every asset is signed, and the application verifies the signature before installing an update.
 
-## Fiabilité des appels
+## Le correctif
 
-- **Fini le « Connexion… » infini.** Si le média ne s'établit pas dans les 40 secondes après l'acceptation, l'appel s'arrête proprement avec une explication (« le média ne s'est pas établi — réseau, relais TURN ? ») au lieu de rester bloqué pour toujours. Le correspondant est prévenu.
-- **Détection de connexion plus fiable.** L'écran passe à « En communication » dès que la connexion ICE aboutit, et pas seulement sur l'état agrégé — ce dernier n'étant pas rapporté partout de la même façon. Le minuteur démarre donc au bon moment.
-- **Trace d'appel honnête.** Un appel accepté mais dont le média n'a jamais abouti s'inscrit désormais « **Appel échoué** » dans le fil, distinct de « Appel · durée » (abouti), « Appel manqué », « Appel refusé » et « Appel annulé ».
+- **L'appel sonne désormais sur TOUS les appareils du correspondant.** Avant, on n'en sonnait qu'un seul (le premier connu). Après une réinstallation — qui crée une nouvelle identité d'appareil — l'application pouvait garder l'**ancien appareil** (mort) comme premier de la liste : l'invitation partait vers lui, et le téléphone actif du correspondant ne sonnait jamais. Les messages, eux, passaient, car ils sont diffusés à tous les appareils ; les appels, non. C'est corrigé : on sonne partout, **le premier qui décroche prend l'appel**, et les autres appareils cessent de sonner.
+- Corollaire : annuler un appel sortant avant réponse fait bien **taire tous** les appareils sonnés.
 
 ## Vérifié
 
-- `flutter analyze` propre ; test d'appel à deux clients vert (appelant et appelé obtiennent leur relais ; trace inscrite des deux côtés)
-- Côté relais de production : la cause racine des appels bloqués a été corrigée séparément (coturn allouait ses relais sur la mauvaise interface — perte de 100 % des paquets ; désormais 0 %)
+- `flutter analyze` propre ; test d'appel à deux clients vert (aucune régression sur le trajet sonnerie → acceptation → raccroché → trace)
+- Le trajet multi-appareils est vérifié par revue (comme la couche média, il ne peut s'éprouver qu'entre appareils réels)

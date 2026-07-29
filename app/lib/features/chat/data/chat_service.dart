@@ -1561,6 +1561,17 @@ class ChatService extends ChangeNotifier {
   /// termine l'appel avec une erreur au lieu de laisser « Connexion… » à vie.
   Timer? _timeoutMedia;
 
+  /// Appelant : TOUS les appareils du correspondant que l'on fait sonner. Un
+  /// correspondant peut en avoir plusieurs (ordi + téléphone, ou un ancien
+  /// appareil resté après réinstallation) ; on sonne partout et on fait taire
+  /// les autres dès qu'un a répondu.
+  List<String> _callCibles = [];
+
+  /// Appelant : candidats ICE locaux produits AVANT qu'un appareil ait répondu.
+  /// Tant qu'on ignore lequel décrochera, on ne sait pas où les router : on les
+  /// met de côté, puis on les envoie à l'appareil qui répond.
+  final List<Map<String, Object?>> _iceLocalEnAttente = [];
+
   /// Active la couche média WebRTC. Désactivable par les tests : WebRTC exige un
   /// binding natif absent d'un `flutter test`, où seule la SIGNALISATION est
   /// éprouvée. En production, toujours vrai.
@@ -1578,12 +1589,21 @@ class ChatService extends ChangeNotifier {
   }
 
   /// Crée la session média et branche l'émission de ses signaux (candidats ICE)
-  /// sur le canal chiffré, vers l'appareil pair.
-  CallSession _creerSessionMedia(Conversation conv, String device, String id) {
+  /// sur le canal chiffré, vers l'appareil pair. La destination est dynamique :
+  /// [callPairDevice] est l'appareil « d'en face » — fixé dès l'invitation côté
+  /// appelé, mais seulement au moment de la réponse côté appelant (qui sonne
+  /// plusieurs appareils). Avant, les candidats sont mis de côté.
+  CallSession _creerSessionMedia(Conversation conv, String id) {
     return CallSession(
       iceServers: callIceServers ?? const [],
-      onSignal: (kind, data) =>
-          unawaited(_envoyerSignalAppel(conv, device, id, kind, data)),
+      onSignal: (kind, data) {
+        final dest = callPairDevice;
+        if (dest == null) {
+          if (kind == 'ice') _iceLocalEnAttente.add(data);
+          return; // on ne sait pas encore vers quel appareil router
+        }
+        unawaited(_envoyerSignalAppel(conv, dest, id, kind, data));
+      },
       onConnecte: (c) {
         callMediaConnecte = c;
         if (c) {
@@ -1623,15 +1643,18 @@ class ChatService extends ChangeNotifier {
     _callConvId = conv.id;
     callEtat = CallEtat.sortant;
     // On sonne chez CHAQUE appareil du correspondant : il décroche où il veut.
+    // Ne pas se limiter au premier évite l'écueil « je sonne un appareil mort »
+    // (typiquement l'ancien, resté en session après une réinstallation).
     final cibles = conv.sessions.keys
         .where((d) => !conv.ownDeviceIds.contains(d))
         .toList();
-    callPairDevice = cibles.isNotEmpty ? cibles.first : null;
-    final device = callPairDevice;
-    if (device == null) {
+    if (cibles.isEmpty) {
       _terminerAppel(trace: false);
       return;
     }
+    _callCibles = cibles;
+    // Appareil « pair » encore inconnu : il sera fixé par la première réponse.
+    callPairDevice = null;
     notifyListeners();
 
     // Prépare le média et joint l'OFFRE à l'invitation. Best-effort : si le
@@ -1640,14 +1663,18 @@ class ChatService extends ChangeNotifier {
     var data = <String, Object?>{'v': 1};
     if (activerMediaAppel) {
       try {
-        final session = _creerSessionMedia(conv, device, id);
+        final session = _creerSessionMedia(conv, id);
         data = await session.creerOffre();
         _callSession = session;
       } catch (e) {
         error = 'Micro indisponible : appel sans audio. (${_humanize(e)})';
       }
     }
-    await _envoyerSignalAppel(conv, device, id, 'invite', data);
+    // Même offre chiffrée séparément pour chaque appareil : le premier qui
+    // répond devient le pair, les autres seront raccrochés.
+    for (final d in cibles) {
+      await _envoyerSignalAppel(conv, d, id, 'invite', data);
+    }
   }
 
   /// Accepte l'appel entrant.
@@ -1683,7 +1710,7 @@ class ChatService extends ChangeNotifier {
     final offre = _offreEntrante;
     if (activerMediaAppel && offre != null && offre['sdp'] != null) {
       try {
-        final session = _creerSessionMedia(conv, device, id);
+        final session = _creerSessionMedia(conv, id);
         data = await session.repondre(offre);
         _callSession = session;
         // Session prête : on rejoue les candidats ICE arrivés en avance.
@@ -1725,13 +1752,19 @@ class ChatService extends ChangeNotifier {
 
   /// Refuse un appel entrant, ou raccroche un appel en cours / sortant.
   Future<void> raccrocher() async {
-    final device = callPairDevice;
     final id = callId;
     final kind = callEtat == CallEtat.entrant ? 'decline' : 'hangup';
-    if (device != null && id != null) {
-      final conv = _convPourDevice(device);
-      if (conv != null) {
-        await _envoyerSignalAppel(conv, device, id, kind, const {});
+    if (id != null) {
+      // Si un appareil pair est déjà choisi, on ne prévient que lui. Sinon
+      // (appelant qui annule avant toute réponse), on prévient TOUS les
+      // appareils sonnés, faute de quoi ils continueraient de sonner.
+      final destinataires =
+          callPairDevice != null ? [callPairDevice!] : _callCibles;
+      for (final d in destinataires) {
+        final conv = _convPourDevice(d);
+        if (conv != null) {
+          await _envoyerSignalAppel(conv, d, id, kind, const {});
+        }
       }
     }
     _terminerAppel(refuse: kind == 'decline');
@@ -1757,6 +1790,8 @@ class ChatService extends ChangeNotifier {
     callIceServers = null;
     _offreEntrante = null;
     _iceEnAttente.clear();
+    _iceLocalEnAttente.clear();
+    _callCibles = [];
     callMuet = false;
     callMediaConnecte = false;
     _mediaAConnecte = false;
@@ -1896,6 +1931,9 @@ class ChatService extends ChangeNotifier {
         notifyListeners();
       case 'answer':
         if (callId == id && callEtat == CallEtat.sortant) {
+          // Premier appareil à répondre : il devient le pair. On l'enregistre
+          // AVANT tout, pour router candidats et raccrochés au bon endroit.
+          callPairDevice = from;
           callEtat = CallEtat.connecte;
           callDepuis = DateTime.now();
           notifyListeners();
@@ -1905,6 +1943,18 @@ class ChatService extends ChangeNotifier {
               await _callSession?.appliquerReponse(data);
             } catch (_) {}
           }
+          // Envoie à l'appareil répondant les candidats ICE mis de côté avant
+          // qu'on sache lequel décrocherait.
+          for (final c in _iceLocalEnAttente) {
+            unawaited(_envoyerSignalAppel(conv, from, id, 'ice', c));
+          }
+          _iceLocalEnAttente.clear();
+          // Fait taire les AUTRES appareils sonnés du correspondant.
+          for (final d in _callCibles) {
+            if (d != from) {
+              unawaited(_envoyerSignalAppel(conv, d, id, 'hangup', const {}));
+            }
+          }
           // Média en négociation : on arme le délai de garde.
           if (_callSession != null) _armerTimeoutMedia();
         }
@@ -1913,6 +1963,9 @@ class ChatService extends ChangeNotifier {
         // (invitation pas encore acceptée), on le met de côté au lieu de le
         // perdre — sinon la connexion échoue faute de candidat relais.
         if (callId != id || data['candidate'] == null) break;
+        // Un appareil pair déjà choisi : on ignore les candidats venus d'un
+        // autre appareil (cas multi-appareils où l'on a sonné partout).
+        if (callPairDevice != null && from != callPairDevice) break;
         if (_callSession == null) {
           _iceEnAttente.add(data);
         } else {
