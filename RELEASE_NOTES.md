@@ -1,6 +1,6 @@
-# ZiaCrypte v0.14.5 — l'appel sonne sur tous les appareils
+# ZiaCrypte v0.14.6 — un message illisible ne bloque plus tout
 
-Correctif : après une réinstallation, le correspondant ne recevait plus les appels. On sonnait un seul de ses appareils — parfois l'ancien, disparu. **À installer sur les deux appareils.**
+Correctif : un seul message indéchiffrable (typiquement après qu'un côté a réinstallé) affichait « Erreur cryptographique » et **bloquait la réception de tous les autres**. Plus maintenant.
 
 ## Downloads
 
@@ -16,10 +16,9 @@ Every asset is signed, and the application verifies the signature before install
 
 ## Le correctif
 
-- **L'appel sonne désormais sur TOUS les appareils du correspondant.** Avant, on n'en sonnait qu'un seul (le premier connu). Après une réinstallation — qui crée une nouvelle identité d'appareil — l'application pouvait garder l'**ancien appareil** (mort) comme premier de la liste : l'invitation partait vers lui, et le téléphone actif du correspondant ne sonnait jamais. Les messages, eux, passaient, car ils sont diffusés à tous les appareils ; les appels, non. C'est corrigé : on sonne partout, **le premier qui décroche prend l'appel**, et les autres appareils cessent de sonner.
-- Corollaire : annuler un appel sortant avant réponse fait bien **taire tous** les appareils sonnés.
+- **Un message qu'on ne peut pas déchiffrer est ignoré, sans bloquer les autres.** Après une réinstallation, le correspondant peut envoyer des messages chiffrés avec l'ancienne session, que la nouvelle installation ne sait plus lire. Jusqu'ici, le premier de ces messages faisait échouer **tout le lot de réception** et affichait une bannière « Erreur cryptographique : ZiaCryptoFailureException » — bloquant l'arrivée des messages **suivants**, pourtant lisibles. Désormais, un message illisible est simplement sauté (comme le sont déjà les messages de groupe indéchiffrables), et la conversation se rétablit d'elle-même dès que le correspondant relance une poignée de main.
+- Même protection sur l'acceptation d'une poignée de main invalide ou rejouée.
 
 ## Vérifié
 
-- `flutter analyze` propre ; test d'appel à deux clients vert (aucune régression sur le trajet sonnerie → acceptation → raccroché → trace)
-- Le trajet multi-appareils est vérifié par revue (comme la couche média, il ne peut s'éprouver qu'entre appareils réels)
+- `flutter analyze` propre ; test d'appel à deux clients vert, y compris l'échange d'un message texte (le chemin de déchiffrement normal reste intact)

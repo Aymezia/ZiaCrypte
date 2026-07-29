@@ -3539,7 +3539,12 @@ class ChatService extends ChangeNotifier {
                 continue; // message non déchiffré tant que ce n'est pas tranché
               }
             }
-            conv.sessions[sender] = await gateway.acceptSession(unpacked.handshake!);
+            try {
+              conv.sessions[sender] =
+                  await gateway.acceptSession(unpacked.handshake!);
+            } catch (_) {
+              continue; // poignée de main invalide/rejouée : on saute ce message
+            }
             conv.targetDeviceIds.add(sender);
             // Côté répondeur aussi : c'est ici qu'on découvre l'appareil d'en
             // face, donc ici qu'on peut commencer à observer sa présence.
@@ -3548,11 +3553,21 @@ class ChatService extends ChangeNotifier {
           final sessionId = conv.sessions[sender];
           if (sessionId == null) continue;
 
+          try {
             clair = await gateway.decrypt(
               sessionId,
               unpacked.ratchetHeader,
               base64Decode(m['ciphertext'] as String),
             );
+          } catch (_) {
+            // Message indéchiffrable : session désynchronisée (typiquement après
+            // qu'un côté a réinstallé), doublon, ou en-tête altéré. On saute ce
+            // message plutôt que d'abandonner TOUT le lot et d'afficher une
+            // « erreur cryptographique ». La conversation se rétablit dès que
+            // l'expéditeur relance une poignée de main. Comme pour les messages
+            // de groupe indéchiffrables, rester silencieux est le bon choix.
+            continue;
+          }
         }
         final plain = clair;
 
