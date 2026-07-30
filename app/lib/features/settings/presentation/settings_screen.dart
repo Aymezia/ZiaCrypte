@@ -163,20 +163,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _modifierStatut() async {
     final s = widget.service;
     final champ = TextEditingController(text: s.statutDe(s.userId) ?? '');
+    // Présences rapides façon Teams : un tap suffit. Le statut reste un texte
+    // libre chiffré diffusé aux correspondants ; ces raccourcis ne font que
+    // pré-remplir des valeurs parlantes (aucun changement de protocole).
+    const presets = [
+      '🟢 Disponible',
+      '🟠 Occupé',
+      '⛔ Ne pas déranger',
+      '🌙 Absent',
+    ];
     final valeur = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Statut'),
-        content: TextField(
-          controller: champ,
-          autofocus: true,
-          maxLength: ChatService.statutMax,
-          decoration: const InputDecoration(
-            hintText: 'Disponible, en réunion, en vacances…',
-            helperText: 'Chiffré : seuls tes correspondants le voient',
-            helperMaxLines: 2,
-          ),
-          onSubmitted: (v) => Navigator.pop(context, v),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final p in presets)
+                  ActionChip(
+                    label: Text(p),
+                    onPressed: () => Navigator.pop(context, p),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: champ,
+              autofocus: true,
+              maxLength: ChatService.statutMax,
+              decoration: const InputDecoration(
+                labelText: 'Ou un statut personnalisé',
+                hintText: 'en réunion, en vacances…',
+                helperText: 'Chiffré : seuls tes correspondants le voient',
+                helperMaxLines: 2,
+              ),
+              onSubmitted: (v) => Navigator.pop(context, v),
+            ),
+          ],
         ),
         actions: [
           // Effacer plutôt que « vider le champ puis valider » : retirer son
