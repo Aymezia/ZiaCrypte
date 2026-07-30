@@ -1677,6 +1677,24 @@ class ChatService extends ChangeNotifier {
   bool callMuet = false;
   bool callMediaConnecte = false;
 
+  /// Qualité de liaison estimée pendant l'appel : 2 bonne, 1 moyenne, 0 faible.
+  int callQualite = 2;
+
+  /// Appel réduit en pastille flottante (on continue de naviguer).
+  bool callReduit = false;
+
+  void reduireAppel() {
+    if (callReduit) return;
+    callReduit = true;
+    notifyListeners();
+  }
+
+  void agrandirAppel() {
+    if (!callReduit) return;
+    callReduit = false;
+    notifyListeners();
+  }
+
   /// Le média s'est-il connecté AU MOINS une fois pendant cet appel ? Sert à
   /// distinguer un appel abouti (trace « Appel · durée ») d'un appel accepté
   /// mais jamais établi (trace « Appel échoué »).
@@ -1735,6 +1753,11 @@ class ChatService extends ChangeNotifier {
           _mediaAConnecte = true;
           _timeoutMedia?.cancel(); // connecté : plus besoin du délai de garde
         }
+        notifyListeners();
+      },
+      onQualite: (n) {
+        if (n == callQualite) return;
+        callQualite = n;
         notifyListeners();
       },
     );
@@ -1920,6 +1943,8 @@ class ChatService extends ChangeNotifier {
     callMuet = false;
     callMediaConnecte = false;
     _mediaAConnecte = false;
+    callQualite = 2;
+    callReduit = false;
     _callConvId = null;
     callDepuis = null;
     notifyListeners();

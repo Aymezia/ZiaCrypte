@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 /// Implémentation média WebRTC, chargée en DIFFÉRÉ par CallSession (call_session.dart).
@@ -27,6 +29,7 @@ class CallMedia {
     required this.iceServers,
     required this.onSignal,
     required this.onConnecte,
+    this.onQualite,
   });
 
   /// Serveurs ICE (TURN) au format attendu par RTCPeerConnection.
@@ -38,9 +41,16 @@ class CallMedia {
   /// Appelé quand le média est réellement connecté (ou perdu).
   final void Function(bool connecte) onConnecte;
 
+  /// Qualité de liaison estimée : 2 bonne, 1 moyenne, 0 faible.
+  final void Function(int niveau)? onQualite;
+
   RTCPeerConnection? _pc;
   MediaStream? _local;
   MediaStream? _remote;
+
+  Timer? _echantillonQualite;
+  int _perdusPrec = 0;
+  int _recusPrec = 0;
 
   MediaStream? get remoteStream => _remote;
 
@@ -85,6 +95,49 @@ class CallMedia {
         onConnecte(false);
       }
     };
+    _demarrerQualite();
+  }
+
+  /// Échantillonne périodiquement la qualité de liaison à partir des stats
+  /// WebRTC (perte de paquets sur l'intervalle, temps d'aller-retour) et publie
+  /// un niveau 2/1/0. Best-effort : une lecture ratée est simplement ignorée.
+  void _demarrerQualite() {
+    if (onQualite == null) return;
+    _echantillonQualite = Timer.periodic(const Duration(seconds: 3), (_) async {
+      final pc = _pc;
+      if (pc == null) return;
+      try {
+        final reports = await pc.getStats();
+        int perdus = 0, recus = 0;
+        double? rtt;
+        for (final r in reports) {
+          if (r.type == 'inbound-rtp') {
+            perdus += ((r.values['packetsLost'] as num?) ?? 0).toInt();
+            recus += ((r.values['packetsReceived'] as num?) ?? 0).toInt();
+          } else if (r.type == 'remote-inbound-rtp') {
+            final v = r.values['roundTripTime'];
+            if (v is num) rtt = v.toDouble();
+          }
+        }
+        final dPerdus = perdus - _perdusPrec;
+        final dRecus = recus - _recusPrec;
+        _perdusPrec = perdus;
+        _recusPrec = recus;
+        if (dRecus + dPerdus <= 0) return; // pas de trafic mesurable
+        final perte = dPerdus / (dRecus + dPerdus);
+        final int niveau;
+        if (perte < 0.02 && (rtt == null || rtt < 0.3)) {
+          niveau = 2;
+        } else if (perte < 0.08 && (rtt == null || rtt < 0.6)) {
+          niveau = 1;
+        } else {
+          niveau = 0;
+        }
+        onQualite!(niveau);
+      } catch (_) {
+        // stats indisponibles sur cette plateforme/instant : on n'insiste pas
+      }
+    });
   }
 
   /// Côté appelant : prépare le média et produit l'offre à joindre à l'invite.
@@ -132,6 +185,8 @@ class CallMedia {
   }
 
   Future<void> fermer() async {
+    _echantillonQualite?.cancel();
+    _echantillonQualite = null;
     for (final t in _local?.getTracks() ?? const []) {
       await t.stop();
     }

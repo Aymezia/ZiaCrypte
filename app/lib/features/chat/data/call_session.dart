@@ -17,11 +17,15 @@ class CallSession {
     required this.iceServers,
     required this.onSignal,
     required this.onConnecte,
+    this.onQualite,
   });
 
   final List<dynamic> iceServers;
   final void Function(String kind, Map<String, Object?> data) onSignal;
   final void Function(bool connecte) onConnecte;
+
+  /// Qualité de liaison estimée : 2 bonne, 1 moyenne, 0 faible.
+  final void Function(int niveau)? onQualite;
 
   dynamic _impl; // CallMedia, chargé en différé
 
@@ -32,6 +36,7 @@ class CallSession {
       iceServers: iceServers,
       onSignal: onSignal,
       onConnecte: onConnecte,
+      onQualite: onQualite,
     );
   }
 

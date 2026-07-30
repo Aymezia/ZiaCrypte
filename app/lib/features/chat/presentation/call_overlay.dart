@@ -72,6 +72,18 @@ class _CallOverlayState extends State<CallOverlay> {
             padding: const EdgeInsets.all(28),
             child: Column(
               children: [
+                // Réduire l'appel en pastille flottante pour continuer à
+                // naviguer (pas pour un appel entrant, qu'il faut trancher).
+                Align(
+                  alignment: Alignment.topLeft,
+                  child: entrant
+                      ? const SizedBox(height: 48)
+                      : IconButton(
+                          tooltip: 'Réduire',
+                          icon: const Icon(Icons.expand_more),
+                          onPressed: service.reduireAppel,
+                        ),
+                ),
                 const Spacer(),
                 // Halo + initiale : sobre, pas d'avatar identité ici.
                 Container(
@@ -108,6 +120,10 @@ class _CallOverlayState extends State<CallOverlay> {
                 Text('Chiffré de bout en bout',
                     style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant)),
+                if (connecte && service.callMediaConnecte) ...[
+                  const SizedBox(height: 12),
+                  _qualite(theme, service.callQualite),
+                ],
                 const Spacer(),
 
                 // Boutons : accepter/refuser pour un entrant, muet/raccrocher
@@ -165,6 +181,37 @@ class _CallOverlayState extends State<CallOverlay> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Indicateur de qualité de liaison : trois barres + libellé, coloré selon
+  /// le niveau (2 bonne, 1 moyenne, 0 faible).
+  Widget _qualite(ThemeData theme, int niveau) {
+    final (couleur, libelle) = switch (niveau) {
+      2 => (const Color(0xFF2FA36B), 'Bonne connexion'),
+      1 => (const Color(0xFFE0A030), 'Connexion moyenne'),
+      _ => (theme.colorScheme.error, 'Connexion faible'),
+    };
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (var i = 0; i < 3; i++) ...[
+          Container(
+            width: 4,
+            height: 8.0 + i * 4,
+            decoration: BoxDecoration(
+              color: i <= niveau
+                  ? couleur
+                  : theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 3),
+        ],
+        const SizedBox(width: 6),
+        Text(libelle,
+            style: theme.textTheme.bodySmall?.copyWith(color: couleur)),
+      ],
     );
   }
 

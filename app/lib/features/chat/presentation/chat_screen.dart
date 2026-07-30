@@ -622,16 +622,73 @@ class _ChatScreenState extends State<ChatScreen> {
               );
 
         // L'écran d'appel se superpose à tout : un appel entrant doit être
-        // impossible à manquer, où qu'on soit dans l'application.
+        // impossible à manquer, où qu'on soit dans l'application. Réduit, il ne
+        // reste qu'une pastille flottante — on continue de naviguer.
         if (!s.enAppel) return contenu;
         return Stack(
-          children: [contenu, Positioned.fill(child: CallOverlay(service: s))],
+          children: [
+            contenu,
+            if (s.callReduit)
+              Positioned(
+                top: MediaQuery.paddingOf(context).top + 10,
+                right: 10,
+                child: _pastilleAppel(theme, s),
+              )
+            else
+              Positioned.fill(child: CallOverlay(service: s)),
+          ],
         );
       },
     );
   }
 
   // ---------------------------------------------------------------- liste
+
+  /// Pastille flottante d'un appel réduit : un tap ré-agrandit, la croix
+  /// raccroche.
+  Widget _pastilleAppel(ThemeData theme, ChatService s) {
+    final enCom = s.callEtat == CallEtat.connecte && s.callMediaConnecte;
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(28),
+      color: theme.colorScheme.primaryContainer,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(28),
+        onTap: s.agrandirAppel,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.call,
+                  size: 18, color: theme.colorScheme.onPrimaryContainer),
+              const SizedBox(width: 8),
+              Text(s.callPeerName ?? 'Appel',
+                  style: TextStyle(
+                      color: theme.colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(width: 6),
+              Text(enCom ? '· en cours' : '· connexion…',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onPrimaryContainer
+                          .withValues(alpha: 0.8))),
+              const SizedBox(width: 10),
+              InkWell(
+                onTap: s.raccrocher,
+                customBorder: const CircleBorder(),
+                child: CircleAvatar(
+                  radius: 15,
+                  backgroundColor: theme.colorScheme.error,
+                  child: Icon(Icons.call_end,
+                      size: 16, color: theme.colorScheme.onError),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   /// Rail d'icônes vertical (fenêtre large), façon Teams : les onglets en haut,
   /// réglages et déconnexion en pied.
