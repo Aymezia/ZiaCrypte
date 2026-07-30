@@ -645,11 +645,62 @@ class _ChatScreenState extends State<ChatScreen> {
                 onPressed: s.logout,
                 icon: const Icon(Icons.logout_rounded),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
+              // Avatar + présence en pied, façon Teams : un tap ouvre le profil.
+              Tooltip(
+                message: s.username ?? '',
+                child: InkWell(
+                  onTap: _ouvrirReglages,
+                  customBorder: const CircleBorder(),
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: _avatarRail(theme, s),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// Avatar de l'utilisateur pour le pied du rail, avec pastille de connexion
+  /// (verte en temps réel, orangée pendant une reconnexion).
+  Widget _avatarRail(ThemeData theme, ChatService s) {
+    final photo = s.photoDe(s.userId);
+    final initiale = (s.username ?? '?').characters.first.toUpperCase();
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        CircleAvatar(
+          radius: 17,
+          backgroundColor: theme.colorScheme.primaryContainer,
+          backgroundImage: photo != null ? MemoryImage(photo) : null,
+          child: photo == null
+              ? Text(initiale,
+                  style: TextStyle(
+                      color: theme.colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w700))
+              : null,
+        ),
+        Positioned(
+          right: -1,
+          bottom: -1,
+          child: Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              color: s.realtime
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.tertiary,
+              shape: BoxShape.circle,
+              border: Border.all(color: theme.colorScheme.surface, width: 2),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
