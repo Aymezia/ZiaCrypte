@@ -129,8 +129,15 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> with WidgetsBindingObserver
         title: 'ZiaCrypte',
         debugShowCheckedModeBanner: false,
         themeMode: _settings.themeMode,
-        theme: ZiaTheme.light(),
-        darkTheme: ZiaTheme.dark(),
+        // Densité : compacte resserre listes et contrôles, façon bureau dense.
+        theme: ZiaTheme.light().copyWith(
+            visualDensity: _settings.densiteCompacte
+                ? VisualDensity.compact
+                : VisualDensity.standard),
+        darkTheme: ZiaTheme.dark().copyWith(
+            visualDensity: _settings.densiteCompacte
+                ? VisualDensity.compact
+                : VisualDensity.standard),
         home: ListenableBuilder(
           listenable: _service,
           builder: (context, _) {

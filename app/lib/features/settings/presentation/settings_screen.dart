@@ -298,6 +298,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
                 SwitchListTile(
+                  value: widget.settings.densiteCompacte,
+                  onChanged: widget.settings.setDensiteCompacte,
+                  secondary: const Icon(Icons.density_small),
+                  title: const Text('Interface compacte'),
+                  subtitle: const Text(
+                      'Resserre listes et contrôles ; sinon, plus d’air'),
+                ),
+                SwitchListTile(
                   value: widget.settings.enterToSend,
                   onChanged: widget.settings.setEnterToSend,
                   title: const Text('Entrée pour envoyer'),

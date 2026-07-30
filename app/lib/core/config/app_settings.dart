@@ -13,7 +13,7 @@ class AppSettings extends ChangeNotifier {
   AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu,
       this._indicateurEcriture, this._accusesLecture, this._partagePresence,
       this._versionEcartee, this._delaiVerrouillage, this._protectionEcran,
-      this._resterConnecte);
+      this._resterConnecte, this._densiteCompacte);
 
   ThemeMode _themeMode;
   bool _enterToSend;
@@ -25,8 +25,13 @@ class AppSettings extends ChangeNotifier {
   int _delaiVerrouillage;
   bool _protectionEcran;
   bool _resterConnecte;
+  bool _densiteCompacte;
 
   ThemeMode get themeMode => _themeMode;
+
+  /// Interface compacte : réduit la hauteur des listes et contrôles, façon
+  /// bureau dense. Confortable (par défaut) laisse plus d'air.
+  bool get densiteCompacte => _densiteCompacte;
   bool get enterToSend => _enterToSend;
 
   /// Les écrans d'accueil ont-ils déjà été montrés ? On ne les impose qu'une
@@ -94,10 +99,11 @@ class AppSettings extends ChangeNotifier {
     int delaiVerrouillage = 60,
     bool protectionEcran = true,
     bool resterConnecte = false,
+    bool densiteCompacte = false,
   }) =>
       AppSettings._(themeMode, enterToSend, onboardingVu, indicateurEcriture,
           accusesLecture, partagePresence, versionEcartee, delaiVerrouillage,
-          protectionEcran, resterConnecte);
+          protectionEcran, resterConnecte, densiteCompacte);
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
@@ -119,13 +125,14 @@ class AppSettings extends ChangeNotifier {
           (json['delaiVerrouillage'] as num?)?.toInt() ?? 60,
           json['protectionEcran'] as bool? ?? true,
           json['resterConnecte'] as bool? ?? false,
+          json['densiteCompacte'] as bool? ?? false,
         );
       }
     } catch (_) {
       // on retombe sur les valeurs par défaut
     }
-    return AppSettings._(
-        ThemeMode.system, true, false, true, false, false, null, 60, true, false);
+    return AppSettings._(ThemeMode.system, true, false, true, false, false, null,
+        60, true, false, false);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -191,6 +198,13 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setDensiteCompacte(bool v) {
+    if (v == _densiteCompacte) return;
+    _densiteCompacte = v;
+    _save();
+    notifyListeners();
+  }
+
   void marquerOnboardingVu() {
     if (_onboardingVu) return;
     _onboardingVu = true;
@@ -213,6 +227,7 @@ class AppSettings extends ChangeNotifier {
         'delaiVerrouillage': _delaiVerrouillage,
         'protectionEcran': _protectionEcran,
         'resterConnecte': _resterConnecte,
+        'densiteCompacte': _densiteCompacte,
       }));
     } catch (_) {
       // écriture best-effort : une préférence non persistée n'est pas critique

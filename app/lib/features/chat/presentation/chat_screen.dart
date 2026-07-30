@@ -701,14 +701,18 @@ class _ChatScreenState extends State<ChatScreen> {
                       color: theme.colorScheme.onPrimaryContainer
                           .withValues(alpha: 0.8))),
               const SizedBox(width: 10),
-              InkWell(
-                onTap: s.raccrocher,
-                customBorder: const CircleBorder(),
-                child: CircleAvatar(
-                  radius: 15,
-                  backgroundColor: theme.colorScheme.error,
-                  child: Icon(Icons.call_end,
-                      size: 16, color: theme.colorScheme.onError),
+              Semantics(
+                button: true,
+                label: 'Raccrocher',
+                child: InkWell(
+                  onTap: s.raccrocher,
+                  customBorder: const CircleBorder(),
+                  child: CircleAvatar(
+                    radius: 15,
+                    backgroundColor: theme.colorScheme.error,
+                    child: Icon(Icons.call_end,
+                        size: 16, color: theme.colorScheme.onError),
+                  ),
                 ),
               ),
             ],
@@ -1036,7 +1040,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                   child: _pastilleEnLigne(theme,
                                       taille: 13,
                                       bordure: theme.colorScheme.surface,
-                                      couleur: _couleurDispo(s, c.peerUserId)),
+                                      couleur: _couleurDispo(s, c.peerUserId),
+                                      label: _libelleDispo(s, c.peerUserId)),
                                 ),
                               ],
                             ),
@@ -1488,18 +1493,34 @@ class _ChatScreenState extends State<ChatScreen> {
   /// vient des messageries d'entreprise, et l'accent cyan reste lisible sur les
   /// deux modes sans introduire une couleur qui n'appartient à rien d'autre.
   Widget _pastilleEnLigne(ThemeData theme,
-          {double taille = 10, Color? bordure, Color? couleur}) =>
-      Container(
-        width: taille,
-        height: taille,
-        decoration: BoxDecoration(
-          color: couleur ?? theme.colorScheme.primary,
-          shape: BoxShape.circle,
-          border: bordure == null ? null : Border.all(color: bordure, width: 2),
-          boxShadow: ZiaTheme.glow(couleur ?? theme.colorScheme.primary,
-              opacity: 0.55, blur: 6),
+          {double taille = 10,
+          Color? bordure,
+          Color? couleur,
+          String? label}) =>
+      Semantics(
+        label: label,
+        child: Container(
+          width: taille,
+          height: taille,
+          decoration: BoxDecoration(
+            color: couleur ?? theme.colorScheme.primary,
+            shape: BoxShape.circle,
+            border:
+                bordure == null ? null : Border.all(color: bordure, width: 2),
+            boxShadow: ZiaTheme.glow(couleur ?? theme.colorScheme.primary,
+                opacity: 0.55, blur: 6),
+          ),
         ),
       );
+
+  /// Libellé de présence pour lecteurs d'écran (dérivé du statut déclaré).
+  String _libelleDispo(ChatService s, String? userId) {
+    final st = s.statutDe(userId) ?? '';
+    if (st.startsWith('🟠')) return 'Occupé';
+    if (st.startsWith('⛔')) return 'Ne pas déranger';
+    if (st.startsWith('🌙')) return 'Absent';
+    return 'En ligne';
+  }
 
   /// Couleur de présence d'un correspondant EN LIGNE, d'après l'emoji de tête
   /// de son statut (posé par les raccourcis Disponible/Occupé/NPD/Absent).
@@ -1586,7 +1607,9 @@ class _ChatScreenState extends State<ChatScreen> {
               if (!conv.isGroup && s.enLigneDans(conv.id)) ...[
                 const SizedBox(width: 8),
                 _pastilleEnLigne(theme,
-                    taille: 8, couleur: _couleurDispo(s, conv.peerUserId)),
+                    taille: 8,
+                    couleur: _couleurDispo(s, conv.peerUserId),
+                    label: _libelleDispo(s, conv.peerUserId)),
               ],
             ],
           ),
