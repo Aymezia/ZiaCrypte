@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../../../core/config/app_config.dart';
 import '../../../core/config/app_storage.dart';
@@ -18,6 +19,7 @@ import '../domain/crypto_models.dart';
 import 'call_session.dart';
 import 'identity_pinning.dart';
 import 'envelope.dart';
+import 'ringtone.dart';
 import 'ffi_crypto_gateway.dart';
 import 'padding.dart';
 
@@ -1683,6 +1685,26 @@ class ChatService extends ChangeNotifier {
   /// Appel réduit en pastille flottante (on continue de naviguer).
   bool callReduit = false;
 
+  /// Sonnerie et vibration de l'appel entrant.
+  final Sonnerie _sonnerie = Sonnerie();
+  Timer? _vibration;
+
+  /// Fait sonner et vibrer (appel entrant). Gardé par [activerMediaAppel] pour
+  /// ne pas toucher l'audio/haptique natif pendant les tests.
+  void _demarrerSonnerie() {
+    if (!activerMediaAppel) return;
+    unawaited(_sonnerie.demarrer());
+    HapticFeedback.heavyImpact();
+    _vibration = Timer.periodic(
+        const Duration(milliseconds: 1500), (_) => HapticFeedback.heavyImpact());
+  }
+
+  void _arreterSonnerie() {
+    _vibration?.cancel();
+    _vibration = null;
+    unawaited(_sonnerie.arreter());
+  }
+
   void reduireAppel() {
     if (callReduit) return;
     callReduit = true;
@@ -1832,6 +1854,7 @@ class ChatService extends ChangeNotifier {
     if (callEtat != CallEtat.entrant || device == null || id == null) return;
     final conv = _convPourDevice(device);
     if (conv == null) return;
+    _arreterSonnerie(); // on décroche : plus de sonnerie
 
     // Le correspondant a besoin de SES PROPRES identifiants TURN : en relais
     // forcé (iceTransportPolicy: relay), un pair sans serveur ICE ne peut créer
@@ -1925,6 +1948,7 @@ class ChatService extends ChangeNotifier {
   /// compte, où aucune trace n'a de sens. [refuse] distingue un refus explicite
   /// (par soi ou par le correspondant) d'une simple annulation.
   void _terminerAppel({bool trace = true, bool refuse = false}) {
+    _arreterSonnerie();
     _timeoutMedia?.cancel();
     _timeoutMedia = null;
     if (trace) _tracerFinAppel(refuse);
@@ -2078,6 +2102,7 @@ class ChatService extends ChangeNotifier {
         callPeerName = conv.peerUsername;
         _callConvId = conv.id;
         callEtat = CallEtat.entrant;
+        _demarrerSonnerie();
         notifyListeners();
       case 'answer':
         if (callId == id && callEtat == CallEtat.sortant) {
@@ -4013,6 +4038,8 @@ class ChatService extends ChangeNotifier {
   @override
   void dispose() {
     _poll?.cancel();
+    _vibration?.cancel();
+    unawaited(_sonnerie.liberer());
     _socket?.close();
     _gateway?.dispose();
     super.dispose();
