@@ -27,6 +27,7 @@ class Conversation {
     this.channelIsAdmin = false,
     this.channelLinkSecret,
     this.unread = 0,
+    this.pinned = false,
   })  : memberUserIds = memberUserIds ?? {},
         ownDeviceIds = ownDeviceIds ?? {},
         targetDeviceIds = targetDeviceIds ?? {},
@@ -87,6 +88,9 @@ class Conversation {
   /// eux, sont optionnels et voyagent chiffrés. Remis à zéro à l'ouverture.
   int unread;
 
+  /// Épinglée en haut de la liste. Purement local et d'affichage.
+  bool pinned;
+
   /// Canal de diffusion (un-vers-plusieurs) plutôt que conversation.
   ///
   /// L'admin publie, les abonnés lisent. On ne réutilise PAS `isGroup` : un
@@ -134,6 +138,7 @@ class Conversation {
         // « convs » est une entrée du coffre chiffré du moteur, jamais en clair.
         if (channelLinkSecret != null) 'chSecret': base64Encode(channelLinkSecret!),
         if (unread > 0) 'unread': unread,
+        if (pinned) 'pinned': true,
       };
 
   static Conversation fromJson(Map<String, Object?> json) => Conversation(
@@ -158,5 +163,6 @@ class Conversation {
             ? null
             : base64Decode(json['chSecret'] as String),
         unread: (json['unread'] as num?)?.toInt() ?? 0,
+        pinned: json['pinned'] as bool? ?? false,
       );
 }

@@ -51,6 +51,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Onglet actif de la barre latérale (façon Teams) : discussions ou appels.
   _Onglet _onglet = _Onglet.discussions;
 
+  /// Filtre appliqué à la liste des discussions.
+  _Filtre _filtre = _Filtre.tous;
+
   void _ouvrirReglages() => Navigator.of(context).push(MaterialPageRoute(
         builder: (_) =>
             SettingsScreen(service: widget.service, settings: widget.settings),
@@ -742,6 +745,12 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _conversationList(ThemeData theme, ChatService s,
       {required bool wide}) {
     final convs = s.conversations;
+    final filtres = convs.where((c) => switch (_filtre) {
+          _Filtre.tous => true,
+          _Filtre.nonLus => c.unread > 0,
+          _Filtre.groupes => c.isGroup,
+          _Filtre.canaux => c.isChannel,
+        }).toList();
     return Column(
       children: [
         AppBar(
@@ -824,15 +833,19 @@ class _ChatScreenState extends State<ChatScreen> {
                     fontSize: 12, color: theme.colorScheme.onErrorContainer)),
           ),
         _banniereMaj(theme),
+        _barreFiltres(theme, convs),
         Expanded(
           child: convs.isEmpty
               ? _noConversations(theme)
-              : ListView.builder(
-                  itemCount: convs.length,
+              : filtres.isEmpty
+                  ? _aucunDansFiltre(theme)
+                  : ListView.builder(
+                  itemCount: filtres.length,
                   itemBuilder: (context, i) {
-                    final c = convs[i];
+                    final c = filtres[i];
                     final selected = c.id == s.activeConversationId;
                     final last = c.lastMessage;
+                    final ecrit = !c.isChannel && s.ecritDans(c.id);
                     // Avatar dérivé de la clé d'identité : si la clé change,
                     // l'apparence change. Indice visuel qui double la
                     // bannière d'alerte, pour qui ne lit pas les bannières.
@@ -876,26 +889,45 @@ class _ChatScreenState extends State<ChatScreen> {
                             ? const TextStyle(fontWeight: FontWeight.w700)
                             : null,
                       ),
-                      subtitle: Text(
-                        last == null
-                            // Une conversation sans message montre le statut
-                            // du correspondant plutôt qu'une ligne vide — sans
-                            // jamais recouvrir un vrai message.
-                            ? (s.statutDe(c.peerUserId) ?? 'Aucun message')
-                            : '${last.mine ? "Vous : " : ""}${last.text}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: c.unread > 0
-                            ? TextStyle(
-                                color: theme.colorScheme.onSurface,
-                                fontWeight: FontWeight.w600)
-                            : null,
+                      subtitle: ecrit
+                          // Le correspondant écrit : ça prime sur le dernier
+                          // message, en italique et à l'accent.
+                          ? Text('écrit…',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: theme.colorScheme.primary,
+                                  fontStyle: FontStyle.italic))
+                          : Text(
+                              last == null
+                                  // Une conversation sans message montre le
+                                  // statut du correspondant plutôt qu'une ligne
+                                  // vide — sans recouvrir un vrai message.
+                                  ? (s.statutDe(c.peerUserId) ?? 'Aucun message')
+                                  : '${last.mine ? "Vous : " : ""}${last.text}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: c.unread > 0
+                                  ? TextStyle(
+                                      color: theme.colorScheme.onSurface,
+                                      fontWeight: FontWeight.w600)
+                                  : null,
+                            ),
+                      // À droite : épingle (si épinglée) puis compte de non-lus.
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (c.pinned)
+                            Icon(Icons.push_pin,
+                                size: 15,
+                                color: theme.colorScheme.onSurfaceVariant),
+                          if (c.pinned && c.unread > 0)
+                            const SizedBox(width: 6),
+                          if (c.unread > 0) _badgeNonLus(theme, c.unread),
+                        ],
                       ),
-                      // Pastille de non-lus : le compte, à droite, à l'accent.
-                      trailing: c.unread > 0
-                          ? _badgeNonLus(theme, c.unread)
-                          : null,
                       onTap: () => s.openConversation(c.id),
+                      onLongPress: () => _menuListe(theme, s, c),
                     );
                   },
                 ),
@@ -1005,6 +1037,66 @@ class _ChatScreenState extends State<ChatScreen> {
     return memeJour
         ? _heure(d)
         : '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}';
+  }
+
+  /// Bande de filtres au-dessus de la liste (façon Teams). Défilable pour ne
+  /// jamais déborder en fenêtre étroite.
+  Widget _barreFiltres(ThemeData theme, List<Conversation> convs) {
+    final nonLus = convs.where((c) => c.unread > 0).length;
+    Widget puce(_Filtre f, String label) => Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: FilterChip(
+            label: Text(label),
+            selected: _filtre == f,
+            onSelected: (_) => setState(() => _filtre = f),
+            visualDensity: VisualDensity.compact,
+          ),
+        );
+    return Container(
+      height: 48,
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          children: [
+            puce(_Filtre.tous, 'Tous'),
+            puce(_Filtre.nonLus, nonLus > 0 ? 'Non lus ($nonLus)' : 'Non lus'),
+            puce(_Filtre.groupes, 'Groupes'),
+            puce(_Filtre.canaux, 'Canaux'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _aucunDansFiltre(ThemeData theme) => Center(
+        child: Text('Rien dans ce filtre',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+      );
+
+  /// Menu d'appui long sur une conversation : épingler/désépingler.
+  void _menuListe(ThemeData theme, ChatService s, Conversation c) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                  c.pinned ? Icons.push_pin_outlined : Icons.push_pin),
+              title: Text(c.pinned ? 'Désépingler' : 'Épingler en haut'),
+              onTap: () {
+                Navigator.pop(ctx);
+                s.basculerEpingle(c.id);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _noConversations(ThemeData theme) => Center(
@@ -2451,3 +2543,6 @@ class _ChatScreenState extends State<ChatScreen> {
 /// Onglets de la barre latérale, façon Teams. L'ordre fixe l'index utilisé par
 /// le rail (large) et la barre basse (étroit).
 enum _Onglet { discussions, appels }
+
+/// Filtres de la liste des discussions.
+enum _Filtre { tous, nonLus, groupes, canaux }

@@ -228,8 +228,22 @@ class ChatService extends ChangeNotifier {
   /// Conversations, la plus récemment active en tête.
   List<Conversation> get conversations {
     final list = _conversations.values.toList();
-    list.sort((a, b) => b.lastActivity.compareTo(a.lastActivity));
+    // Épinglées d'abord, puis par activité récente. Tri stable : deux épinglées
+    // gardent leur ordre d'activité entre elles.
+    list.sort((a, b) {
+      if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+      return b.lastActivity.compareTo(a.lastActivity);
+    });
     return list;
+  }
+
+  /// Épingle ou désépingle une conversation (haut de liste). Local et persisté.
+  Future<void> basculerEpingle(String conversationId) async {
+    final conv = _conversations[conversationId];
+    if (conv == null) return;
+    conv.pinned = !conv.pinned;
+    notifyListeners();
+    await _saveConversations();
   }
 
   Conversation? get active =>
