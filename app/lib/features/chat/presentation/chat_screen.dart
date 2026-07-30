@@ -48,6 +48,14 @@ class _ChatScreenState extends State<ChatScreen> {
   /// bouton « revenir en bas » pour signaler qu'il y a du nouveau.
   bool _nouveauEnBas = false;
 
+  /// Onglet actif de la barre latérale (façon Teams) : discussions ou appels.
+  _Onglet _onglet = _Onglet.discussions;
+
+  void _ouvrirReglages() => Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) =>
+            SettingsScreen(service: widget.service, settings: widget.settings),
+      ));
+
   @override
   void initState() {
     super.initState();
@@ -556,18 +564,28 @@ class _ChatScreenState extends State<ChatScreen> {
         _scrollToEndIfNeeded(conv?.messages.length ?? 0,
             mien: dernier?.mine ?? false);
 
-        // Fenêtre étroite : on affiche soit la liste, soit la conversation.
+        // Volet de gauche (liste) selon l'onglet : discussions ou appels.
+        Widget voletListe(bool wide) => _onglet == _Onglet.discussions
+            ? _conversationList(theme, s, wide: wide)
+            : _appelsList(theme, s, wide: wide);
+
         final Widget contenu = !wide
+            // Fenêtre étroite : liste (avec barre d'onglets en bas) OU
+            // conversation plein écran. La barre d'onglets ne s'affiche qu'au
+            // niveau liste, pas dans une conversation ouverte.
             ? (conv == null
-                ? _listScaffold(theme, s)
+                ? Scaffold(
+                    body: voletListe(false),
+                    bottomNavigationBar: _barreOnglets(theme, s),
+                  )
                 : _conversationScaffold(theme, s, showBack: true))
+            // Fenêtre large : rail d'icônes, puis la liste, puis la conversation.
             : Scaffold(
                 body: Row(
                   children: [
-                    SizedBox(
-                      width: 300,
-                      child: _conversationList(theme, s),
-                    ),
+                    _rail(theme, s),
+                    const VerticalDivider(width: 1),
+                    SizedBox(width: 300, child: voletListe(true)),
                     const VerticalDivider(width: 1),
                     Expanded(
                       child: conv == null
@@ -590,9 +608,83 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // ---------------------------------------------------------------- liste
 
-  Widget _listScaffold(ThemeData theme, ChatService s) => Scaffold(
-        body: _conversationList(theme, s),
-      );
+  /// Rail d'icônes vertical (fenêtre large), façon Teams : les onglets en haut,
+  /// réglages et déconnexion en pied.
+  Widget _rail(ThemeData theme, ChatService s) {
+    return NavigationRail(
+      selectedIndex: _onglet.index,
+      onDestinationSelected: (i) =>
+          setState(() => _onglet = _Onglet.values[i]),
+      labelType: NavigationRailLabelType.all,
+      destinations: const [
+        NavigationRailDestination(
+            icon: Icon(Icons.forum_outlined),
+            selectedIcon: Icon(Icons.forum),
+            label: Text('Discussions')),
+        NavigationRailDestination(
+            icon: Icon(Icons.call_outlined),
+            selectedIcon: Icon(Icons.call),
+            label: Text('Appels')),
+      ],
+      trailing: Expanded(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Réglages',
+                onPressed: _ouvrirReglages,
+                icon: const Icon(Icons.settings_outlined),
+              ),
+              IconButton(
+                tooltip: 'Se déconnecter',
+                onPressed: s.logout,
+                icon: const Icon(Icons.logout_rounded),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Barre d'onglets basse (fenêtre étroite) : Discussions / Appels.
+  Widget _barreOnglets(ThemeData theme, ChatService s) {
+    return NavigationBar(
+      selectedIndex: _onglet.index,
+      onDestinationSelected: (i) =>
+          setState(() => _onglet = _Onglet.values[i]),
+      destinations: const [
+        NavigationDestination(
+            icon: Icon(Icons.forum_outlined),
+            selectedIcon: Icon(Icons.forum),
+            label: 'Discussions'),
+        NavigationDestination(
+            icon: Icon(Icons.call_outlined),
+            selectedIcon: Icon(Icons.call),
+            label: 'Appels'),
+      ],
+    );
+  }
+
+  /// Boutons Réglages + déconnexion pour un en-tête de liste. Vides en fenêtre
+  /// large : le rail les porte déjà, inutile de les répéter.
+  List<Widget> _actionsCompte(ChatService s, {required bool wide}) => wide
+      ? const []
+      : [
+          IconButton(
+            tooltip: 'Réglages',
+            onPressed: _ouvrirReglages,
+            icon: const Icon(Icons.settings_outlined),
+          ),
+          IconButton(
+            tooltip: 'Se déconnecter',
+            onPressed: () => s.logout(),
+            icon: const Icon(Icons.logout_rounded),
+          ),
+        ];
 
   /// Bandeau discret quand une version plus récente est publiée.
   ///
@@ -647,7 +739,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _conversationList(ThemeData theme, ChatService s) {
+  Widget _conversationList(ThemeData theme, ChatService s,
+      {required bool wide}) {
     final convs = s.conversations;
     return Column(
       children: [
@@ -718,19 +811,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     leading: Icon(Icons.link), title: Text('Rejoindre un canal'))),
               ],
             ),
-            IconButton(
-              tooltip: 'Options',
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => SettingsScreen(
-                    service: widget.service, settings: widget.settings),
-              )),
-              icon: const Icon(Icons.settings_outlined),
-            ),
-            IconButton(
-              tooltip: 'Se déconnecter',
-              onPressed: () => s.logout(),
-              icon: const Icon(Icons.logout_rounded),
-            ),
+            ..._actionsCompte(s, wide: wide),
           ],
         ),
         if (s.error != null)
@@ -821,6 +902,109 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       ],
     );
+  }
+
+  /// Onglet « Appels » : l'historique, reconstitué à partir des traces d'appel
+  /// déjà inscrites dans les conversations (« Appel · durée », « Appel manqué »…).
+  /// Rien de nouveau n'est stocké : on relit ce que chaque fin d'appel a laissé.
+  Widget _appelsList(ThemeData theme, ChatService s, {required bool wide}) {
+    final entrees = <({Conversation conv, ChatMessage msg})>[];
+    for (final c in s.conversations) {
+      if (c.isGroup || c.isChannel) continue; // les appels sont en tête-à-tête
+      for (final m in c.messages) {
+        if (m.systeme && m.text.startsWith('Appel')) {
+          entrees.add((conv: c, msg: m));
+        }
+      }
+    }
+    entrees.sort((a, b) => b.msg.at.compareTo(a.msg.at));
+
+    return Column(
+      children: [
+        AppBar(
+          automaticallyImplyLeading: false,
+          title: const Text('Appels'),
+          actions: _actionsCompte(s, wide: wide),
+        ),
+        Expanded(
+          child: entrees.isEmpty
+              ? _aucunAppel(theme)
+              : ListView.builder(
+                  itemCount: entrees.length,
+                  itemBuilder: (context, i) {
+                    final e = entrees[i];
+                    final manque = e.msg.text.contains('manqué');
+                    final rate = e.msg.text.contains('refusé') ||
+                        e.msg.text.contains('annulé') ||
+                        e.msg.text.contains('échoué');
+                    final (IconData icone, Color couleur) = manque
+                        ? (Icons.call_missed, theme.colorScheme.error)
+                        : rate
+                            ? (Icons.call_end, theme.colorScheme.onSurfaceVariant)
+                            : (Icons.call_made, theme.colorScheme.primary);
+                    return ListTile(
+                      selected: e.conv.id == s.activeConversationId,
+                      selectedTileColor:
+                          theme.colorScheme.surfaceContainerHighest,
+                      leading: CircleAvatar(
+                        backgroundColor:
+                            theme.colorScheme.surfaceContainerHighest,
+                        child: Icon(icone, color: couleur, size: 20),
+                      ),
+                      title: Text(e.conv.peerUsername,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text(
+                        '${e.msg.text} · ${_horodatageCourt(e.msg.at)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Rappeler',
+                        icon: const Icon(Icons.call),
+                        onPressed: s.enAppel ? null : () => s.appeler(e.conv),
+                      ),
+                      onTap: () => s.openConversation(e.conv.id),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _aucunAppel(ThemeData theme) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.call_outlined,
+                  size: 40, color: theme.colorScheme.primary),
+              const SizedBox(height: 12),
+              Text('Aucun appel',
+                  style: theme.textTheme.titleMedium,
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 6),
+              Text(
+                'Tes appels passés apparaîtront ici.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  /// Heure du jour même, sinon date courte : de quoi situer un appel sans
+  /// alourdir la ligne.
+  static String _horodatageCourt(DateTime d) {
+    final now = DateTime.now();
+    final memeJour =
+        d.year == now.year && d.month == now.month && d.day == now.day;
+    return memeJour
+        ? _heure(d)
+        : '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}';
   }
 
   Widget _noConversations(ThemeData theme) => Center(
@@ -2263,3 +2447,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 }
+
+/// Onglets de la barre latérale, façon Teams. L'ordre fixe l'index utilisé par
+/// le rail (large) et la barre basse (étroit).
+enum _Onglet { discussions, appels }
