@@ -84,6 +84,10 @@ class ApiClient {
     return f;
   }
 
+  /// Reprend une session à partir du seul refresh token (au lancement, sans
+  /// redemander le mot de passe). Échoue si le token est expiré/révoqué.
+  Future<void> reprendreSession() => _renouveler();
+
   Future<void> _faireRenouvellement() async {
     final rt = refreshToken;
     if (rt == null) throw StateError('pas de refresh token');

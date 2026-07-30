@@ -317,6 +317,34 @@ class ChatService extends ChangeNotifier {
 
   SavedAccount? get savedAccount => AppStorage.loadAccount();
 
+  /// « Rester connecté » : garde le jeton de reprise dans le coffre chiffré et
+  /// le renouvelle à chaque rotation, pour reprendre la session au lancement
+  /// sans mot de passe. Réglé à la connexion, mis à false efface le jeton.
+  bool resterConnecte = false;
+
+  /// Clé du jeton de reprise dans le coffre local chiffré de l'appareil.
+  static const _cleJetonReprise = 'session_refresh';
+
+  /// Écrit ou efface le jeton de reprise selon [resterConnecte]. Best-effort :
+  /// un échec de coffre ne doit pas faire échouer la connexion elle-même.
+  Future<void> _majJetonReprise() async {
+    final gateway = _gateway;
+    final api = _api;
+    if (gateway == null) return;
+    try {
+      final token = resterConnecte ? api?.refreshToken : null;
+      if (token != null) {
+        await gateway.vaultWrite(
+            _cleJetonReprise, Uint8List.fromList(utf8.encode(token)));
+      } else {
+        // Efface un éventuel jeton résiduel (désactivation, ou token absent).
+        await gateway.vaultWrite(_cleJetonReprise, Uint8List(0));
+      }
+    } catch (_) {
+      // coffre indisponible : on n'empêche pas la session de vivre pour autant
+    }
+  }
+
   /// Ouvre le moteur sur le dossier d'un compte.
   ///
   /// Chaque compte a le sien : une identité partagée entre deux comptes leur
@@ -339,8 +367,10 @@ class ChatService extends ChangeNotifier {
     required String user,
     required String password,
     String? serverUrl,
+    bool resterConnecte = false,
   }) async {
     _setBusy(true);
+    this.resterConnecte = resterConnecte;
     try {
       final api = fabriqueApi(serverUrl ?? AppConfig.serverUrl);
       // Dossier neuf tiré au hasard : le moteur n'y trouve aucune identité et
@@ -370,6 +400,7 @@ class ChatService extends ChangeNotifier {
         deviceId: deviceId!,
         storageKey: storageKey,
       ));
+      await _majJetonReprise();
       _setBusy(false);
     } catch (e) {
       _setBusy(false, err: _humanize(e, auth: _AuthKind.creation));
@@ -389,8 +420,10 @@ class ChatService extends ChangeNotifier {
     required String password,
     String? totp,
     String? serverUrl,
+    bool resterConnecte = false,
   }) async {
     _setBusy(true);
+    this.resterConnecte = resterConnecte;
     try {
       final api = fabriqueApi(serverUrl ?? AppConfig.serverUrl);
       // Dossier neuf : cet appareil a sa propre identité, distincte de celle
@@ -422,6 +455,7 @@ class ChatService extends ChangeNotifier {
         deviceId: deviceId!,
         storageKey: storageKey,
       ));
+      await _majJetonReprise();
       _setBusy(false);
     } catch (e) {
       if (_isTotpRequired(e)) {
@@ -436,7 +470,10 @@ class ChatService extends ChangeNotifier {
   }
 
   Future<void> loginAndConnect(
-      {required String password, String? totp, String? serverUrl}) async {
+      {required String password,
+      String? totp,
+      String? serverUrl,
+      bool resterConnecte = false}) async {
     final account = savedAccount;
     if (account == null) {
       _setBusy(false, err: 'Aucun compte enregistré sur cet appareil.');
@@ -453,7 +490,9 @@ class ChatService extends ChangeNotifier {
         totp: totp,
       );
       needsTotp = false;
+      this.resterConnecte = resterConnecte;
       await _adoptSession(api, gateway, res, account.username);
+      await _majJetonReprise();
       _setBusy(false);
     } catch (e) {
       if (_isTotpRequired(e)) {
@@ -464,6 +503,56 @@ class ChatService extends ChangeNotifier {
       }
       _setBusy(false, err: _humanize(e, auth: _AuthKind.reconnexion));
       rethrow;
+    }
+  }
+
+  /// Reprend la session au lancement SANS mot de passe, si « rester connecté »
+  /// a été activé et qu'un jeton de reprise valide subsiste dans le coffre.
+  ///
+  /// Renvoie true si la session est reprise. En cas d'échec d'authentification
+  /// (jeton révoqué/expiré), on efface le jeton mort et on retombe sur l'écran
+  /// de connexion. En cas de simple souci réseau, on GARDE le jeton : un
+  /// lancement hors-ligne ne doit pas forcer à ressaisir le mot de passe ensuite.
+  Future<bool> reprendreSession({String? serverUrl}) async {
+    final account = savedAccount;
+    if (account == null) return false;
+    FfiCryptoGateway? gateway;
+    try {
+      gateway = await _openGateway(account.enginePath);
+      final brut = await gateway.vaultRead(_cleJetonReprise);
+      if (brut == null || brut.isEmpty) {
+        await gateway.dispose();
+        return false;
+      }
+      final api = fabriqueApi(serverUrl ?? AppConfig.serverUrl);
+      api.refreshToken = utf8.decode(brut);
+      await api.reprendreSession(); // jetons frais, ou exception
+      resterConnecte = true;
+      final res = <String, dynamic>{
+        'accessToken': api.accessToken,
+        'refreshToken': api.refreshToken,
+        'userId': account.userId,
+        'deviceId': account.deviceId,
+        // Le rôle ne voyage pas dans le refresh ; non-admin par défaut. Un login
+        // complet au mot de passe le rétablit au besoin (usage admin, rare).
+        'role': 'user',
+      };
+      await _adoptSession(api, gateway, res, account.username);
+      await _majJetonReprise();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      // Jeton refusé (401/403) → il est mort, on l'efface. Autre cause (réseau,
+      // serveur down) → on le conserve pour retenter au prochain lancement.
+      final refuse = e is DioException &&
+          (e.response?.statusCode == 401 || e.response?.statusCode == 403);
+      if (refuse) {
+        try {
+          await gateway?.vaultWrite(_cleJetonReprise, Uint8List(0));
+        } catch (_) {}
+      }
+      await gateway?.dispose();
+      return false;
     }
   }
 
@@ -505,6 +594,9 @@ class ChatService extends ChangeNotifier {
     // expiration (le serveur ne vérifie le jeton qu'à la poignée de main) et
     // toute reconnexion ultérieure relira le jeton frais — rien à forcer.
     api.refreshToken = res['refreshToken'] as String?;
+    // Le refresh token tourne à chaque renouvellement : on réécrit alors le
+    // jeton de reprise, sinon « rester connecté » garderait un jeton périmé.
+    api.onTokensRenewed = () => unawaited(_majJetonReprise());
     _api = api;
     _gateway = gateway;
     username = user;
@@ -537,6 +629,10 @@ class ChatService extends ChangeNotifier {
     // Remis à zéro : sans ça, une révocation constatée collerait à la session
     // suivante et empêcherait toute reconnexion sur cet appareil.
     _revoqueDetectee = false;
+    // Déconnexion explicite : on efface le jeton de reprise pour que la
+    // prochaine ouverture redemande bien le mot de passe.
+    resterConnecte = false;
+    await _majJetonReprise();
     _poll?.cancel();
     await _socket?.close();
     _socket = null;

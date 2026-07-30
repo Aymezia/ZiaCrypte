@@ -12,7 +12,8 @@ import 'app_storage.dart';
 class AppSettings extends ChangeNotifier {
   AppSettings._(this._themeMode, this._enterToSend, this._onboardingVu,
       this._indicateurEcriture, this._accusesLecture, this._partagePresence,
-      this._versionEcartee, this._delaiVerrouillage, this._protectionEcran);
+      this._versionEcartee, this._delaiVerrouillage, this._protectionEcran,
+      this._resterConnecte);
 
   ThemeMode _themeMode;
   bool _enterToSend;
@@ -23,6 +24,7 @@ class AppSettings extends ChangeNotifier {
   String? _versionEcartee;
   int _delaiVerrouillage;
   bool _protectionEcran;
+  bool _resterConnecte;
 
   ThemeMode get themeMode => _themeMode;
   bool get enterToSend => _enterToSend;
@@ -62,6 +64,12 @@ class AppSettings extends ChangeNotifier {
   /// photographier l'écran avec un autre appareil.
   bool get protectionEcran => _protectionEcran;
 
+  /// Rester connecté : au lancement, l'application reprend la session sans
+  /// redemander le mot de passe (le jeton de reprise est gardé dans le coffre
+  /// chiffré de l'appareil). Le verrou par code, s'il est posé, protège quand
+  /// même l'accès. Désactivé => mot de passe à chaque ouverture.
+  bool get resterConnecte => _resterConnecte;
+
   /// Version de mise à jour écartée par l'utilisateur, s'il y en a une.
   ///
   /// On la retient pour ne pas répéter la même bannière à chaque lancement,
@@ -85,10 +93,11 @@ class AppSettings extends ChangeNotifier {
     String? versionEcartee,
     int delaiVerrouillage = 60,
     bool protectionEcran = true,
+    bool resterConnecte = false,
   }) =>
       AppSettings._(themeMode, enterToSend, onboardingVu, indicateurEcriture,
           accusesLecture, partagePresence, versionEcartee, delaiVerrouillage,
-          protectionEcran);
+          protectionEcran, resterConnecte);
 
   static File get _file => File('${AppStorage.dataDirectory.path}/settings.json');
 
@@ -109,13 +118,14 @@ class AppSettings extends ChangeNotifier {
           json['versionEcartee'] as String?,
           (json['delaiVerrouillage'] as num?)?.toInt() ?? 60,
           json['protectionEcran'] as bool? ?? true,
+          json['resterConnecte'] as bool? ?? false,
         );
       }
     } catch (_) {
       // on retombe sur les valeurs par défaut
     }
     return AppSettings._(
-        ThemeMode.system, true, false, true, false, false, null, 60, true);
+        ThemeMode.system, true, false, true, false, false, null, 60, true, false);
   }
 
   void setThemeMode(ThemeMode mode) {
@@ -174,6 +184,13 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setResterConnecte(bool v) {
+    if (v == _resterConnecte) return;
+    _resterConnecte = v;
+    _save();
+    notifyListeners();
+  }
+
   void marquerOnboardingVu() {
     if (_onboardingVu) return;
     _onboardingVu = true;
@@ -195,6 +212,7 @@ class AppSettings extends ChangeNotifier {
         'versionEcartee': _versionEcartee,
         'delaiVerrouillage': _delaiVerrouillage,
         'protectionEcran': _protectionEcran,
+        'resterConnecte': _resterConnecte,
       }));
     } catch (_) {
       // écriture best-effort : une préférence non persistée n'est pas critique

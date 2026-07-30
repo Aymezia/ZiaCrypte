@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/config/app_settings.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../chat/data/chat_service.dart';
 
 /// Écran d'entrée : reconnexion au compte de l'appareil, ou création d'un compte.
 class ConnectScreen extends StatefulWidget {
-  const ConnectScreen({super.key, required this.service});
+  const ConnectScreen({super.key, required this.service, required this.settings});
 
   final ChatService service;
+  final AppSettings settings;
 
   @override
   State<ConnectScreen> createState() => _ConnectScreenState();
@@ -32,6 +34,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
   /// taper à l'aveugle, première cause d'erreur de saisie sur mobile.
   bool _obscure = true;
 
+  /// « Rester connecté » : mémorise la préférence de l'appareil pour la
+  /// reprise automatique au lancement. Pré-cochée selon le dernier choix.
+  late bool _resterConnecte = widget.settings.resterConnecte;
+
   @override
   void dispose() {
     _server.dispose();
@@ -49,6 +55,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final serverUrl = AppConfig.allowServerOverride ? _server.text.trim() : null;
+    // On mémorise le choix « rester connecté » AVANT la tentative : ainsi la
+    // préférence est déjà à jour pour la reprise au prochain lancement.
+    widget.settings.setResterConnecte(_resterConnecte);
     try {
       switch (_mode) {
         case _Mode.creation:
@@ -56,6 +65,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
             user: _username.text.trim(),
             password: _password.text,
             serverUrl: serverUrl,
+            resterConnecte: _resterConnecte,
           );
         case _Mode.compteExistant:
           await widget.service.addDeviceAndConnect(
@@ -63,12 +73,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
             password: _password.text,
             totp: _codeOrNull,
             serverUrl: serverUrl,
+            resterConnecte: _resterConnecte,
           );
         case _Mode.reconnexion:
           await widget.service.loginAndConnect(
             password: _password.text,
             totp: _codeOrNull,
             serverUrl: serverUrl,
+            resterConnecte: _resterConnecte,
           );
       }
     } catch (_) {
@@ -220,7 +232,35 @@ class _ConnectScreenState extends State<ConnectScreen> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 8),
+
+                      // Rester connecté : évite de retaper le mot de passe à
+                      // chaque ouverture. Le jeton de reprise est gardé dans le
+                      // coffre chiffré de l'appareil ; le verrou par code (s'il
+                      // est posé) protège quand même l'accès.
+                      InkWell(
+                        onTap: s.busy
+                            ? null
+                            : () => setState(
+                                () => _resterConnecte = !_resterConnecte),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: _resterConnecte,
+                                onChanged: s.busy
+                                    ? null
+                                    : (v) => setState(
+                                        () => _resterConnecte = v ?? false),
+                              ),
+                              const Expanded(child: Text('Rester connecté')),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
 
                       FilledButton(
                         onPressed: s.busy ? null : _submit,

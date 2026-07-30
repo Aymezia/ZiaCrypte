@@ -34,6 +34,11 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> with WidgetsBindingObserver
   /// Verrouillé tant que le code n'a pas été saisi.
   bool _verrouille = false;
 
+  /// Reprise de session en cours au lancement (« rester connecté ») : on
+  /// affiche un écran d'attente le temps de la tentative, sans faire clignoter
+  /// l'écran de connexion.
+  bool _repriseEnCours = false;
+
   /// Instant où l'application est passée en arrière-plan.
   DateTime? _partiAu;
 
@@ -83,6 +88,28 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> with WidgetsBindingObserver
     _service.indicateurEcritureActif = _settings.indicateurEcriture;
     _service.accusesLectureActifs = _settings.accusesLecture;
     _service.partagePresenceActif = _settings.partagePresence;
+    _tenterReprise();
+  }
+
+  /// « Rester connecté » : au lancement, reprend la session sans mot de passe.
+  /// En cas de succès, si un code de verrouillage existe, on l'exige d'emblée
+  /// (« code à l'ouverture »).
+  void _tenterReprise() {
+    if (!_settings.resterConnecte ||
+        _service.savedAccount == null ||
+        _service.connected) {
+      return;
+    }
+    _repriseEnCours = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final ok = await _service.reprendreSession();
+      final verrou = ok && await _service.verrouillageActif();
+      if (!mounted) return;
+      setState(() {
+        _verrouille = verrou;
+        _repriseEnCours = false;
+      });
+    });
   }
 
   @override
@@ -107,6 +134,9 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> with WidgetsBindingObserver
         home: ListenableBuilder(
           listenable: _service,
           builder: (context, _) {
+            // Reprise « rester connecté » en cours : écran d'attente, pour ne
+            // pas laisser clignoter l'écran de connexion avant de rentrer.
+            if (_repriseEnCours) return const _EcranReprise();
             if (_service.connected) {
               if (_verrouille) {
                 return LockScreen(
@@ -122,8 +152,48 @@ class _ZiaCrypteAppState extends State<ZiaCrypteApp> with WidgetsBindingObserver
               return OnboardingScreen(
                   onTermine: _settings.marquerOnboardingVu);
             }
-            return ConnectScreen(service: _service);
+            return ConnectScreen(service: _service, settings: _settings);
           },
+        ),
+      ),
+    );
+  }
+}
+
+/// Écran d'attente pendant la reprise automatique de session au lancement.
+class _EcranReprise extends StatelessWidget {
+  const _EcranReprise();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: DecoratedBox(
+        decoration: ZiaTheme.backgroundDecoration(theme.colorScheme),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: ZiaTheme.accentGradient(theme.colorScheme),
+                  boxShadow: ZiaTheme.glow(theme.colorScheme.primary,
+                      opacity: 0.4, blur: 24),
+                ),
+                child: Icon(Icons.lock_rounded,
+                    size: 40, color: theme.colorScheme.onPrimary),
+              ),
+              const SizedBox(height: 28),
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ],
+          ),
         ),
       ),
     );
