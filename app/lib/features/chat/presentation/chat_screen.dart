@@ -1,8 +1,11 @@
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pasteboard/pasteboard.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/config/app_settings.dart';
@@ -62,6 +65,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Message survolé (desktop) : fait apparaître les actions rapides.
   String? _messageSurvole;
+
+  /// Un fichier est en train d'être glissé au-dessus de la conversation.
+  bool _survolFichier = false;
 
   /// Défile jusqu'au message [id] (s'il est chargé) et le surligne brièvement.
   void _allerAuMessage(String? id) {
@@ -245,7 +251,12 @@ class _ChatScreenState extends State<ChatScreen> {
       path = await _askFilePath();
     }
     if (path == null) return;
+    await _envoyerChemin(path);
+  }
 
+  /// Valide puis envoie un fichier par son chemin. Partagé par le sélecteur, le
+  /// glisser-déposer et le collage d'image.
+  Future<void> _envoyerChemin(String path) async {
     final file = File(path);
     if (!await file.exists()) {
       if (!mounted) return;
@@ -264,6 +275,23 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     await widget.service.sendAttachment(path);
+  }
+
+  /// Colle une image du presse-papier (Ctrl/⌘+V) : on l'écrit dans un fichier
+  /// temporaire puis on l'envoie. Sans image dans le presse-papier, ne fait
+  /// rien — le collage de texte suit son cours normal.
+  Future<void> _collerImage() async {
+    try {
+      final bytes = await Pasteboard.image;
+      if (bytes == null) return;
+      final dir = await getTemporaryDirectory();
+      final f = File(
+          '${dir.path}/colle_${DateTime.now().millisecondsSinceEpoch}.png');
+      await f.writeAsBytes(bytes);
+      await _envoyerChemin(f.path);
+    } catch (_) {
+      // presse-papier illisible ou sans image : rien à faire
+    }
   }
 
   Future<void> _openAttachment(AttachmentRef ref) async {
@@ -2622,7 +2650,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _messagesAndComposer(ThemeData theme, ChatService s) {
     final conv = s.active!;
-    return Column(
+    final colonne = Column(
       children: [
         // En tête de conversation : impossible de manquer une alerte de
         // changement de clé.
@@ -2773,19 +2801,33 @@ class _ChatScreenState extends State<ChatScreen> {
                       widget.service.sendVoiceMessage(path, durationMs),
                 ),
                 Expanded(
-                  child: TextField(
-                    controller: _input,
-                    onChanged: (_) => widget.service.signalerEcriture(),
-                    onSubmitted: (_) => _send(),
-                    enabled: conv.ready,
-                    decoration: InputDecoration(
-                      hintText: conv.ready
-                          ? 'Message chiffré…'
-                          : 'Session en cours d’ouverture…',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24)),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 14),
+                  // Sniffe Ctrl/⌘+V pour coller une image, sans voler le focus
+                  // ni empêcher le collage de texte normal.
+                  child: Focus(
+                    canRequestFocus: false,
+                    onKeyEvent: (node, event) {
+                      if (event is KeyDownEvent &&
+                          event.logicalKey == LogicalKeyboardKey.keyV &&
+                          (HardwareKeyboard.instance.isControlPressed ||
+                              HardwareKeyboard.instance.isMetaPressed)) {
+                        _collerImage();
+                      }
+                      return KeyEventResult.ignored;
+                    },
+                    child: TextField(
+                      controller: _input,
+                      onChanged: (_) => widget.service.signalerEcriture(),
+                      onSubmitted: (_) => _send(),
+                      enabled: conv.ready,
+                      decoration: InputDecoration(
+                        hintText: conv.ready
+                            ? 'Message chiffré…'
+                            : 'Session en cours d’ouverture…',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24)),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 14),
+                      ),
                     ),
                   ),
                 ),
@@ -2796,6 +2838,52 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
       ],
+    );
+
+    // Glisser-déposer un fichier n'importe où sur la conversation l'envoie.
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _survolFichier = true),
+      onDragExited: (_) => setState(() => _survolFichier = false),
+      onDragDone: (detail) async {
+        setState(() => _survolFichier = false);
+        for (final f in detail.files) {
+          await _envoyerChemin(f.path);
+        }
+      },
+      child: Stack(
+        children: [
+          colonne,
+          if (_survolFichier)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  alignment: Alignment.center,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 18),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.file_upload_outlined,
+                              color: theme.colorScheme.primary),
+                          const SizedBox(width: 10),
+                          Text('Déposez pour envoyer',
+                              style: theme.textTheme.titleMedium),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
