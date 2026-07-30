@@ -91,6 +91,10 @@ class Conversation {
   /// Épinglée en haut de la liste. Purement local et d'affichage.
   bool pinned;
 
+  /// Index du premier message non lu au moment de l'ouverture, pour tracer la
+  /// ligne « Nouveaux messages ». Transitoire (jamais persisté) ; -1 = aucune.
+  int nouveauxDepuis = -1;
+
   /// Canal de diffusion (un-vers-plusieurs) plutôt que conversation.
   ///
   /// L'admin publie, les abonnés lisent. On ne réutilise PAS `isGroup` : un

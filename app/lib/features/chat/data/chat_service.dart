@@ -782,6 +782,13 @@ class ChatService extends ChangeNotifier {
     if (conv == null) return;
     activeConversationId = conversationId;
     error = null;
+    // Ligne « Nouveaux messages » : on retient où commençaient les non-lus
+    // AVANT de remettre le compteur à zéro. Pas de ligne si tout est non lu
+    // (repère inutile) ni si rien ne l'est.
+    conv.nouveauxDepuis =
+        (conv.unread >= 1 && conv.unread < conv.messages.length)
+            ? conv.messages.length - conv.unread
+            : -1;
     // Ouvrir vaut lecture : le compteur de non-lus retombe à zéro, quel que
     // soit le réglage des accusés de lecture — c'est un repère local, pas un
     // signal envoyé au correspondant.

@@ -54,6 +54,28 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Filtre appliqué à la liste des discussions.
   _Filtre _filtre = _Filtre.tous;
 
+  /// Clés par message (id → clé), pour défiler jusqu'à un message cité.
+  final Map<String, GlobalKey> _clesMessages = {};
+
+  /// Message momentanément surligné après un saut vers un message cité.
+  String? _messageSurligne;
+
+  /// Message survolé (desktop) : fait apparaître les actions rapides.
+  String? _messageSurvole;
+
+  /// Défile jusqu'au message [id] (s'il est chargé) et le surligne brièvement.
+  void _allerAuMessage(String? id) {
+    if (id == null) return;
+    final ctx = _clesMessages[id]?.currentContext;
+    if (ctx == null) return; // hors écran / pas encore construit : on ne force pas
+    Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 300), alignment: 0.3);
+    setState(() => _messageSurligne = id);
+    Future.delayed(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _messageSurligne = null);
+    });
+  }
+
   void _ouvrirReglages() => Navigator.of(context).push(MaterialPageRoute(
         builder: (_) =>
             SettingsScreen(service: widget.service, settings: widget.settings),
@@ -1622,22 +1644,41 @@ class _ChatScreenState extends State<ChatScreen> {
                       : null,
                 ),
               Flexible(
-                child: GestureDetector(
-                  onLongPress: () => _menuMessage(m),
-                  onSecondaryTap: () => _menuMessage(m),
-                  child: Column(
-                    crossAxisAlignment: m.mine
-                        ? CrossAxisAlignment.end
-                        : CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _bulle(theme, m, memeAuteurAvant, memeAuteurApres, conv.isGroup),
-                      if (m.reactions.isNotEmpty) _reactions(theme, m),
-                      // Le pied porte l'heure et l'état ; on le montre en fin de
-                      // groupe, ou toujours pour un échec — un « réessayer »
-                      // enfoui au milieu d'une salve ne se verrait pas.
-                      if (finDeGroupe || m.sendFailed) _piedDeMessage(theme, m),
-                    ],
+                child: MouseRegion(
+                  onEnter: (_) => _survol(m, true),
+                  onExit: (_) => _survol(m, false),
+                  child: GestureDetector(
+                    onLongPress: () => _menuMessage(m),
+                    onSecondaryTap: () => _menuMessage(m),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Column(
+                          crossAxisAlignment: m.mine
+                              ? CrossAxisAlignment.end
+                              : CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _bulle(theme, m, memeAuteurAvant, memeAuteurApres,
+                                conv.isGroup),
+                            if (m.reactions.isNotEmpty) _reactions(theme, m),
+                            // Le pied porte l'heure et l'état ; en fin de groupe,
+                            // ou toujours pour un échec — un « réessayer » enfoui
+                            // au milieu d'une salve ne se verrait pas.
+                            if (finDeGroupe || m.sendFailed)
+                              _piedDeMessage(theme, m),
+                          ],
+                        ),
+                        // Actions rapides au survol (desktop), flottantes.
+                        if (_cleSurvol(m) == _messageSurvole)
+                          Positioned(
+                            top: -10,
+                            right: m.mine ? 4 : null,
+                            left: m.mine ? null : 4,
+                            child: _actionsSurvol(theme, m),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1784,33 +1825,39 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  /// Extrait du message cité, affiché au-dessus de la réponse.
-  Widget _citation(ThemeData theme, ChatMessage m, Color encre) => Container(
-        margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.only(left: 8),
-        decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(color: encre.withValues(alpha: 0.6), width: 3),
+  /// Extrait du message cité, affiché au-dessus de la réponse. Un tap y défile
+  /// et le surligne brièvement (s'il est chargé dans le fil).
+  Widget _citation(ThemeData theme, ChatMessage m, Color encre) => InkWell(
+        onTap: () => _allerAuMessage(m.replyToId),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.only(left: 8),
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(color: encre.withValues(alpha: 0.6), width: 3),
+            ),
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              m.replyToMine == true ? 'Toi' : 'Réponse',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: encre.withValues(alpha: 0.85)),
-            ),
-            Text(
-              m.replyToText ?? '',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: encre.withValues(alpha: 0.75)),
-            ),
-          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                m.replyToMine == true ? 'Toi' : 'Réponse',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: encre.withValues(alpha: 0.85)),
+              ),
+              Text(
+                m.replyToText ?? '',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    TextStyle(fontSize: 12, color: encre.withValues(alpha: 0.75)),
+              ),
+            ],
+          ),
         ),
       );
 
@@ -1976,6 +2023,70 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(child: Divider(color: theme.dividerColor)),
           ],
         ),
+      );
+
+  /// Clé de survol d'un message (les messages sans id gardent une clé stable
+  /// dérivée de leur horodatage, le temps de la session).
+  String _cleSurvol(ChatMessage m) =>
+      m.id ?? 'a${m.at.microsecondsSinceEpoch}';
+
+  void _survol(ChatMessage m, bool entre) {
+    final cle = _cleSurvol(m);
+    if (entre && _messageSurvole != cle) {
+      setState(() => _messageSurvole = cle);
+    } else if (!entre && _messageSurvole == cle) {
+      setState(() => _messageSurvole = null);
+    }
+  }
+
+  /// Petite barre d'actions rapides au survol (desktop) : réagir, répondre,
+  /// plus. Flotte au-dessus de la bulle sans décaler la mise en page.
+  Widget _actionsSurvol(ThemeData theme, ChatMessage m) {
+    final conv = widget.service.active;
+    final peutReagir =
+        m.id != null && !m.deletedForEveryone && !(conv?.isChannel ?? false);
+    Widget btn(IconData i, String tip, VoidCallback onTap) => IconButton(
+          tooltip: tip,
+          icon: Icon(i, size: 18),
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(),
+          padding: const EdgeInsets.all(6),
+          onPressed: onTap,
+        );
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      elevation: 1,
+      borderRadius: BorderRadius.circular(20),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (peutReagir)
+            btn(Icons.add_reaction_outlined, 'Réagir', () => _menuMessage(m)),
+          btn(Icons.reply, 'Répondre', () => widget.service.startReply(m)),
+          btn(Icons.more_horiz, 'Plus', () => _menuMessage(m)),
+        ],
+      ),
+    );
+  }
+
+  /// Séparateur « Nouveaux messages » (avant le premier non-lu à l'ouverture).
+  Widget _ligneNouveaux(ThemeData theme) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(children: [
+          Expanded(
+              child: Divider(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.4))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text('Nouveaux messages',
+                style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w700)),
+          ),
+          Expanded(
+              child: Divider(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.4))),
+        ]),
       );
 
   /// Menu d'un message : répondre, copier.
@@ -2461,7 +2572,32 @@ class _ChatScreenState extends State<ChatScreen> {
                             : null;
                         final ligne =
                             _ligneMessage(theme, conv, m, precedent, suivant);
-                        return _animerEntree(ligne, m, dernier: suivant == null);
+                        Widget contenu =
+                            _animerEntree(ligne, m, dernier: suivant == null);
+                        // Surlignage bref après un saut vers un message cité.
+                        if (m.id != null && m.id == _messageSurligne) {
+                          contenu = AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: contenu,
+                          );
+                        }
+                        // Ligne « Nouveaux messages » avant le premier non-lu.
+                        if (i == conv.nouveauxDepuis) {
+                          contenu = Column(children: [
+                            _ligneNouveaux(theme),
+                            contenu,
+                          ]);
+                        }
+                        final cle = m.id != null
+                            ? (_clesMessages[m.id!] ??= GlobalKey())
+                            : null;
+                        return KeyedSubtree(
+                            key: cle ?? ValueKey('msg$i'), child: contenu);
                       },
                     ),
                     // Bouton « revenir en bas », visible seulement quand on a
