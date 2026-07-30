@@ -1,6 +1,6 @@
-# ZiaCrypte v0.14.6 — un message illisible ne bloque plus tout
+# ZiaCrypte v0.15.0 — rester connecté + refonte façon Teams
 
-Correctif : un seul message indéchiffrable (typiquement après qu'un côté a réinstallé) affichait « Erreur cryptographique » et **bloquait la réception de tous les autres**. Plus maintenant.
+Une grosse mise à jour : plus besoin de retaper son mot de passe à chaque ouverture, une interface repensée avec barre latérale et onglet Appels, et une longue série d'améliorations du fil, des appels et du confort.
 
 ## Downloads
 
@@ -14,11 +14,38 @@ Correctif : un seul message indéchiffrable (typiquement après qu'un côté a r
 
 Every asset is signed, and the application verifies the signature before installing an update.
 
-## Le correctif
+## Rester connecté
 
-- **Un message qu'on ne peut pas déchiffrer est ignoré, sans bloquer les autres.** Après une réinstallation, le correspondant peut envoyer des messages chiffrés avec l'ancienne session, que la nouvelle installation ne sait plus lire. Jusqu'ici, le premier de ces messages faisait échouer **tout le lot de réception** et affichait une bannière « Erreur cryptographique : ZiaCryptoFailureException » — bloquant l'arrivée des messages **suivants**, pourtant lisibles. Désormais, un message illisible est simplement sauté (comme le sont déjà les messages de groupe indéchiffrables), et la conversation se rétablit d'elle-même dès que le correspondant relance une poignée de main.
-- Même protection sur l'acceptation d'une poignée de main invalide ou rejouée.
+- **Case « Rester connecté »** à la connexion : l'application **reprend la session à l'ouverture, sans mot de passe**. Le jeton de reprise est gardé dans le coffre chiffré de l'appareil — et comme le mot de passe ne chiffrait déjà pas les clés en local, on ne perd aucune sécurité.
+- **Code à l'ouverture** : si un code de verrouillage est posé, il est demandé d'emblée. Interrupteur dans Réglages > Compte pour couper « rester connecté » sans se déconnecter.
+
+## Interface façon Teams
+
+- **Barre latérale d'icônes** (grand écran) : Discussions / Appels, avec ton **avatar et ta pastille de connexion** en pied ; barre d'onglets en bas sur mobile.
+- **Onglet Appels** : l'historique des appels (durée, manqués, refusés…), avec rappel en un tap.
+- **Épingler des conversations** (appui long) et **filtres** au-dessus de la liste : Tous / Non lus / Groupes / Canaux.
+- **Présence riche** : raccourcis 🟢 Disponible / 🟠 Occupé / ⛔ Ne pas déranger / 🌙 Absent, et la **pastille se colore** selon l'état déclaré.
+
+## Fil de discussion
+
+- **Actions au survol** (desktop) : réagir / répondre / plus, sans appui long.
+- **« … est en train d'écrire »** directement dans la liste.
+- **Ligne « Nouveaux messages »** là où tu t'étais arrêté ; **taper une citation** défile jusqu'au message d'origine et le surligne.
+- **Mise en forme légère** : `code`, **gras**, _italique_.
+- **Coller une image** (Ctrl/⌘+V) et **glisser-déposer** un fichier pour l'envoyer.
+
+## Appels
+
+- **Sonnerie et vibration** à l'appel entrant.
+- **Indicateur de qualité** de liaison (bonne / moyenne / faible) une fois connecté.
+- **Réduire l'appel en pastille flottante** pour continuer à naviguer pendant la communication.
+
+## Confort & accessibilité
+
+- **Interface compacte** (Réglages > Apparence) pour resserrer listes et contrôles.
+- **Libellés pour lecteurs d'écran** sur la présence et les appels ; la taille de police système est respectée.
 
 ## Vérifié
 
-- `flutter analyze` propre ; test d'appel à deux clients vert, y compris l'échange d'un message texte (le chemin de déchiffrement normal reste intact)
+- `flutter analyze` propre ; suite widget/unit verte ; test d'appel à deux clients (sonnerie, acceptation, relais, trace) vert
+- Nouvelles dépendances natives pour le coller/glisser (`desktop_drop`, `pasteboard`) : à confirmer au premier build sur chaque plateforme
