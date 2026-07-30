@@ -950,7 +950,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                   bottom: -1,
                                   child: _pastilleEnLigne(theme,
                                       taille: 13,
-                                      bordure: theme.colorScheme.surface),
+                                      bordure: theme.colorScheme.surface,
+                                      couleur: _couleurDispo(s, c.peerUserId)),
                                 ),
                               ],
                             ),
@@ -1401,18 +1402,32 @@ class _ChatScreenState extends State<ChatScreen> {
   /// À l'accent du thème plutôt qu'au vert convenu : le vert de disponibilité
   /// vient des messageries d'entreprise, et l'accent cyan reste lisible sur les
   /// deux modes sans introduire une couleur qui n'appartient à rien d'autre.
-  Widget _pastilleEnLigne(ThemeData theme, {double taille = 10, Color? bordure}) =>
+  Widget _pastilleEnLigne(ThemeData theme,
+          {double taille = 10, Color? bordure, Color? couleur}) =>
       Container(
         width: taille,
         height: taille,
         decoration: BoxDecoration(
-          color: theme.colorScheme.primary,
+          color: couleur ?? theme.colorScheme.primary,
           shape: BoxShape.circle,
           border: bordure == null ? null : Border.all(color: bordure, width: 2),
-          boxShadow: ZiaTheme.glow(theme.colorScheme.primary,
+          boxShadow: ZiaTheme.glow(couleur ?? theme.colorScheme.primary,
               opacity: 0.55, blur: 6),
         ),
       );
+
+  /// Couleur de présence d'un correspondant EN LIGNE, d'après l'emoji de tête
+  /// de son statut (posé par les raccourcis Disponible/Occupé/NPD/Absent).
+  /// Vert par défaut — en ligne sans état déclaré = disponible.
+  Color _couleurDispo(ChatService s, String? userId) {
+    final statut = s.statutDe(userId) ?? '';
+    if (statut.startsWith('🟠')) return const Color(0xFFE0A030); // occupé
+    if (statut.startsWith('⛔')) return Theme.of(context).colorScheme.error;
+    if (statut.startsWith('🌙')) {
+      return Theme.of(context).colorScheme.onSurfaceVariant; // absent
+    }
+    return Theme.of(context).colorScheme.primary; // disponible / par défaut
+  }
 
   /// « 0 abonné », « 1 abonné », « 3 abonnés » — accord au pluriel.
   String _pluriel(int n, String mot) => '$n $mot${n > 1 ? 's' : ''}';
@@ -1485,7 +1500,8 @@ class _ChatScreenState extends State<ChatScreen> {
               // le projet n'a aucune raison de le reconstituer.
               if (!conv.isGroup && s.enLigneDans(conv.id)) ...[
                 const SizedBox(width: 8),
-                _pastilleEnLigne(theme, taille: 8),
+                _pastilleEnLigne(theme,
+                    taille: 8, couleur: _couleurDispo(s, conv.peerUserId)),
               ],
             ],
           ),
