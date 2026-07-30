@@ -325,6 +325,14 @@ class ChatService extends ChangeNotifier {
   /// Clé du jeton de reprise dans le coffre local chiffré de l'appareil.
   static const _cleJetonReprise = 'session_refresh';
 
+  /// Active/désactive « rester connecté » en cours de session : écrit ou efface
+  /// le jeton de reprise en conséquence, sans se déconnecter.
+  Future<void> definirResterConnecte(bool v) async {
+    resterConnecte = v;
+    await _majJetonReprise();
+    notifyListeners();
+  }
+
   /// Écrit ou efface le jeton de reprise selon [resterConnecte]. Best-effort :
   /// un échec de coffre ne doit pas faire échouer la connexion elle-même.
   Future<void> _majJetonReprise() async {

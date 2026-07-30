@@ -350,6 +350,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('Cet appareil'),
             subtitle: Text(s.deviceId ?? '—'),
           ),
+          ListenableBuilder(
+            listenable: widget.settings,
+            builder: (context, _) => SwitchListTile(
+              secondary: const Icon(Icons.how_to_reg_outlined),
+              title: const Text('Rester connecté'),
+              subtitle: const Text(
+                  'Reprend la session à l’ouverture, sans mot de passe. Le '
+                  'jeton est gardé dans le coffre chiffré de l’appareil ; le '
+                  'code de verrouillage, s’il est posé, protège quand même.'),
+              value: widget.settings.resterConnecte,
+              onChanged: (v) {
+                widget.settings.setResterConnecte(v);
+                s.definirResterConnecte(v).ignore();
+              },
+            ),
+          ),
 
           const Divider(height: 32),
           _section(theme, 'Sécurité'),
